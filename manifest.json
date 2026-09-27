@@ -1,0 +1,58 @@
+{
+  "manifest_version": 3,
+  "name": "DeepSeek",
+  "version": "0.1.0",
+  "description": "在侧边栏使用 DeepSeek 网页版，并可让它操作你的浏览器。",
+  "minimum_chrome_version": "114",
+  "permissions": [
+    "tabs",
+    "scripting",
+    "sidePanel",
+    "storage",
+    "declarativeNetRequest",
+    "contextMenus"
+  ],
+  "host_permissions": ["<all_urls>"],
+  "background": {
+    "service_worker": "background/service-worker.js"
+  },
+  "side_panel": {
+    "default_path": "sidepanel/index.html"
+  },
+  "action": {
+    "default_title": "DeepSeek",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  },
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "content_scripts": [
+    {
+      "matches": ["http://*/*", "https://*/*"],
+      "js": ["content/bridge.js"],
+      "run_at": "document_idle",
+      "all_frames": false
+    },
+    {
+      "matches": ["https://chat.deepseek.com/*"],
+      "js": ["content/deepseek-bridge.js"],
+      "run_at": "document_idle",
+      "all_frames": true
+    }
+  ],
+  "declarative_net_request": {
+    "rule_resources": [
+      {
+        "id": "unframe_deepseek",
+        "enabled": true,
+        "path": "rules.json"
+      }
+    ]
+  }
+}

@@ -1,0 +1,24 @@
+# 本地工作区数据（WorkBuddy 会话/记忆等，与插件无关）
+.workbuddy/
+
+# Chrome 加载未打包扩展时自动生成的本地数据
+_metadata/
+
+# 编辑器 / IDE
+.idea/
+.vscode/
+
+# 环境变量与密钥（本仓库不使用，防御性忽略）
+.env
+.env.*
+*.pem
+*.key
+
+# 打包产物
+*.crx
+*.zip
+
+# 系统文件
+.DS_Store
+Thumbs.db
+Desktop.ini
