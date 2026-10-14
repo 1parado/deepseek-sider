@@ -1,0 +1,631 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>AI Sider — 在浏览器侧边栏使用多个 AI</title>
+<meta name="description" content="AI Sider：在浏览器侧边栏中使用多个 AI 网页版（DeepSeek / ChatGPT / Claude / Gemini…），支持 Ctrl 多选并排对比，一键把网页选中内容送进 AI 提问。" />
+<link rel="icon" href="https://api.iconify.design/logos:deepseek.svg" />
+<style>
+  /* ============ 基础 ============ */
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  :root {
+    --bg: #f5f5f7;
+    --card: #ffffff;
+    --ink: #1d1d1f;
+    --ink-2: #6e6e73;
+    --ink-3: #86868b;
+    --blue: #0071e3;
+    --blue-soft: #e8f1fd;
+    --green: #34a853;
+    --line: rgba(0,0,0,.08);
+    --radius: 22px;
+    --nav-h: 52px;
+  }
+  html { scroll-behavior: smooth; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro SC", "SF Pro Text", "PingFang SC", "Segoe UI", "Microsoft YaHei", sans-serif;
+    background: var(--bg);
+    color: var(--ink);
+    -webkit-font-smoothing: antialiased;
+    overflow-x: hidden;
+  }
+  ::selection { background: rgba(0,113,227,.18); }
+  a { color: inherit; text-decoration: none; }
+  img { display: block; }
+
+  .wrap { max-width: 1080px; margin: 0 auto; padding: 0 24px; }
+
+  /* ============ 毛玻璃导航 ============ */
+  nav {
+    position: fixed; top: 0; left: 0; right: 0; z-index: 100;
+    height: var(--nav-h);
+    background: rgba(245,245,247,.72);
+    -webkit-backdrop-filter: saturate(180%) blur(20px);
+    backdrop-filter: saturate(180%) blur(20px);
+    border-bottom: 1px solid var(--line);
+  }
+  nav .wrap { height: 100%; display: flex; align-items: center; gap: 28px; }
+  .logo { display: flex; align-items: center; gap: 9px; font-weight: 700; font-size: 15px; letter-spacing: -0.2px; }
+  .logo svg { width: 22px; height: 22px; }
+  nav .links { display: flex; gap: 24px; margin-left: auto; font-size: 13px; color: var(--ink-2); }
+  nav .links a { transition: color .2s; }
+  nav .links a:hover { color: var(--ink); }
+  .nav-cta {
+    background: var(--blue); color: #fff !important;
+    padding: 6px 14px; border-radius: 999px; font-weight: 500;
+    transition: transform .2s, box-shadow .2s;
+  }
+  .nav-cta:hover { transform: scale(1.04); box-shadow: 0 6px 18px rgba(0,113,227,.35); }
+  @media (max-width: 720px) { nav .links a:not(.nav-cta) { display: none; } }
+
+  /* ============ Hero ============ */
+  .hero { padding: 140px 0 40px; text-align: center; position: relative; }
+  .hero .eyebrow {
+    display: inline-flex; align-items: center; gap: 7px;
+    font-size: 13px; color: var(--blue); font-weight: 600;
+    background: var(--blue-soft); border-radius: 999px; padding: 7px 16px;
+    margin-bottom: 22px;
+  }
+  .hero h1 {
+    font-size: clamp(40px, 7vw, 72px);
+    line-height: 1.05; letter-spacing: -2px; font-weight: 800;
+  }
+  .hero h1 .grad {
+    background: linear-gradient(92deg, #0071e3 8%, #7d4bff 45%, #e8508b 85%);
+    -webkit-background-clip: text; background-clip: text; color: transparent;
+  }
+  .hero .sub {
+    margin: 20px auto 0; max-width: 620px;
+    font-size: clamp(17px, 2.4vw, 21px); color: var(--ink-2); line-height: 1.5;
+  }
+  .hero .cta-row { margin-top: 34px; display: flex; gap: 14px; justify-content: center; flex-wrap: wrap; }
+  .btn {
+    display: inline-flex; align-items: center; gap: 8px;
+    padding: 13px 26px; border-radius: 999px; font-size: 15px; font-weight: 500;
+    transition: transform .25s cubic-bezier(.34,1.56,.64,1), box-shadow .25s;
+  }
+  .btn-dark { background: var(--ink); color: #fff; }
+  .btn-dark:hover { transform: translateY(-2px) scale(1.03); box-shadow: 0 12px 28px rgba(0,0,0,.22); }
+  .btn-ghost { color: var(--blue); border: 1px solid rgba(0,113,227,.35); }
+  .btn-ghost:hover { background: var(--blue-soft); transform: translateY(-2px); }
+
+  /* ============ 浏览器窗框 + 扩展复刻 ============ */
+  .stage { margin: 64px auto 0; max-width: 920px; }
+  .browser {
+    border-radius: 18px; overflow: hidden;
+    background: #fff;
+    box-shadow: 0 40px 90px -20px rgba(0,0,0,.28), 0 0 0 1px var(--line);
+    animation: stage-float 7s ease-in-out infinite;
+  }
+  @keyframes stage-float { 50% { transform: translateY(-10px); } }
+  .browser-bar {
+    display: flex; align-items: center; gap: 8px;
+    background: #f0f0f2; padding: 11px 14px; border-bottom: 1px solid var(--line);
+  }
+  .dots { display: flex; gap: 7px; }
+  .dots i { width: 11px; height: 11px; border-radius: 50%; }
+  .dots i:nth-child(1) { background: #ff5f57; }
+  .dots i:nth-child(2) { background: #febc2e; }
+  .dots i:nth-child(3) { background: #28c840; }
+  .addr {
+    flex: 1; max-width: 380px; margin: 0 auto;
+    background: #fff; border-radius: 8px; padding: 5px 12px;
+    font-size: 12px; color: var(--ink-3); text-align: center;
+    border: 1px solid var(--line);
+  }
+  .browser-body { display: flex; height: 480px; background: #fafafa; }
+  .page-sim { flex: 1; padding: 34px; user-select: none; }
+  .page-sim .l1 { height: 16px; width: 55%; border-radius: 6px; background: #e8e8ec; margin-bottom: 12px; }
+  .page-sim .l2 { height: 10px; border-radius: 5px; background: #eeeef1; margin-bottom: 9px; }
+  .page-sim .l2.w80 { width: 80%; } .page-sim .l2.w65 { width: 65%; } .page-sim .l2.w90 { width: 90%; }
+
+  /* --- 扩展侧栏复刻 --- */
+  .ext { width: 320px; flex: none; background: #fff; border-left: 1px solid var(--line); display: flex; flex-direction: column; font-size: 12px; }
+  .ext-bar { display: flex; align-items: center; gap: 4px; padding: 8px 10px 6px; border-bottom: 1px solid #ececec; }
+  .ext-tab {
+    width: 30px; height: 30px; border-radius: 8px; padding: 6px;
+    display: grid; place-items: center; position: relative;
+    opacity: .45; transition: all .3s; flex: none; cursor: default;
+  }
+  .ext-tab svg { width: 100%; height: 100%; }
+  .ext-tab.cur { opacity: 1; background: #e3edfd; }
+  .ext-tab.sel { opacity: 1; background: #e9f7ef; }
+  .ext-tab.sel::after {
+    content: ""; position: absolute; top: 3px; right: 3px;
+    width: 7px; height: 7px; border-radius: 50%; background: var(--green);
+  }
+  .ext-tab.add { font-size: 16px; color: var(--ink-3); opacity: 1; }
+  .ext-actions { margin-left: auto; display: flex; gap: 4px; color: var(--ink-3); font-size: 13px; }
+  .ext-actions span { padding: 3px 4px; }
+  .ext-view { flex: 1; position: relative; display: flex; }
+  .ext-pane { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+  .ext-pane + .split { width: 5px; flex: none; background: #eceef1; cursor: col-resize; position: relative; }
+  .ext-pane + .split::after { content: ""; position: absolute; top: 0; bottom: 0; left: 1px; right: 1px; border-radius: 3px; background: transparent; }
+  .ext-head {
+    display: flex; align-items: center; gap: 6px;
+    padding: 6px 8px; border-bottom: 1px solid #f0f0f2;
+  }
+  .ext-head .ic { width: 15px; height: 15px; }
+  .ext-head .nm { font-weight: 600; font-size: 11px; }
+  .ext-head .alive { width: 6px; height: 6px; border-radius: 50%; background: var(--green); margin-left: 2px; }
+  .ext-head .x { margin-left: auto; color: #b0b3b8; }
+  .ext-chat { flex: 1; padding: 12px 10px; overflow: hidden; }
+  .bubble { border-radius: 12px; padding: 7px 10px; margin-bottom: 9px; max-width: 92%; line-height: 1.45; animation: bbl .5s both; }
+  .bubble.q { background: var(--blue-soft); margin-left: auto; border-bottom-right-radius: 4px; }
+  .bubble.a { background: #f2f3f5; border-bottom-left-radius: 4px; }
+  .bubble.a .typing { display: inline-block; }
+  .bubble.a .typing i { display: inline-block; width: 5px; height: 5px; border-radius: 50%; background: #b6b9be; margin-right: 3px; animation: tpy 1.1s infinite; }
+  .bubble.a .typing i:nth-child(2) { animation-delay: .18s; }
+  .bubble.a .typing i:nth-child(3) { animation-delay: .36s; }
+  @keyframes tpy { 40% { transform: translateY(-4px); opacity: .5; } }
+  @keyframes bbl { from { opacity: 0; transform: translateY(8px) scale(.96); } }
+  .ext-input { margin: 8px 10px 10px; border: 1px solid #e3e5e9; border-radius: 10px; padding: 7px 10px; color: #b0b3b8; display: flex; justify-content: space-between; }
+  .ext-input .snd { color: #c9ccd1; }
+  /* 面板动画状态 */
+  .ext-view.single .pane-b { display: none; }
+  .ext-view.single .pane-a { flex: 1; }
+  .ext-view.split { animation: none; }
+  .pane-b { flex: 1; animation: pane-in .45s both; }
+  .pane-a { animation: pane-in .45s both; }
+  @keyframes pane-in { from { opacity: 0; transform: scale(.97); } }
+  .demo-badge {
+    margin: 18px auto 0; width: fit-content;
+    font-size: 12.5px; color: var(--ink-2);
+    background: #fff; border: 1px solid var(--line);
+    border-radius: 999px; padding: 7px 16px;
+    display: flex; align-items: center; gap: 8px;
+  }
+  .demo-badge .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--green); animation: blink 1.6s infinite; }
+  @keyframes blink { 50% { opacity: .25; } }
+
+  /* ============ 通用 section ============ */
+  section { padding: 90px 0; }
+  .sec-title { font-size: clamp(30px, 4.4vw, 46px); font-weight: 800; letter-spacing: -1px; text-align: center; }
+  .sec-sub { text-align: center; color: var(--ink-2); margin-top: 12px; font-size: 17px; }
+
+  /* ============ 功能卡片 ============ */
+  .grid { display: grid; grid-template-columns: repeat(6, 1fr); gap: 18px; margin-top: 52px; }
+  .card {
+    grid-column: span 2;
+    background: var(--card); border-radius: var(--radius);
+    padding: 28px 26px; box-shadow: 0 1px 2px rgba(0,0,0,.04), 0 0 0 1px var(--line);
+    transition: transform .3s cubic-bezier(.34,1.4,.64,1), box-shadow .3s;
+    position: relative; overflow: hidden;
+  }
+  .card:hover { transform: translateY(-6px); box-shadow: 0 22px 44px -12px rgba(0,0,0,.14), 0 0 0 1px var(--line); }
+  .card.wide { grid-column: span 3; }
+  .card .fi { font-size: 30px; width: 54px; height: 54px; border-radius: 15px; display: grid; place-items: center; margin-bottom: 16px; }
+  .card h3 { font-size: 18px; letter-spacing: -.3px; margin-bottom: 7px; }
+  .card p { font-size: 14px; color: var(--ink-2); line-height: 1.55; }
+  .card .kx { color: var(--ink); background: #f0f0f2; border-radius: 5px; padding: 1px 6px; font-size: 12px; font-family: inherit; border-bottom: 2px solid #ddd; }
+  @media (max-width: 860px) { .card, .card.wide { grid-column: span 6; } }
+  @media (min-width: 521px) and (max-width: 860px) { .card, .card.wide { grid-column: span 3; } }
+
+  /* ============ 深色对比大卡（多选演示） ============ */
+  .dark-card {
+    margin-top: 52px;
+    background: #0b0b0f; border-radius: 28px; padding: 54px 40px;
+    color: #f5f5f7; text-align: center; position: relative; overflow: hidden;
+  }
+  .dark-card::before {
+    content: ""; position: absolute; inset: -40%;
+    background:
+      radial-gradient(40% 40% at 25% 30%, rgba(0,113,227,.35), transparent 70%),
+      radial-gradient(35% 35% at 75% 60%, rgba(125,75,255,.3), transparent 70%),
+      radial-gradient(30% 30% at 50% 85%, rgba(232,80,139,.25), transparent 70%);
+    animation: drift 12s ease-in-out infinite alternate;
+  }
+  @keyframes drift { to { transform: translate(4%, -4%) rotate(3deg); } }
+  .dark-card > * { position: relative; }
+  .dark-card h3 { font-size: clamp(24px, 3.4vw, 34px); font-weight: 800; letter-spacing: -0.6px; }
+  .dark-card p { color: #a1a1a6; margin-top: 10px; font-size: 15px; }
+  .mini-compare {
+    margin: 34px auto 0; max-width: 640px; display: flex; gap: 8px; height: 190px;
+  }
+  .mini-pane {
+    flex: 1; background: rgba(255,255,255,.07); border: 1px solid rgba(255,255,255,.12);
+    border-radius: 14px; padding: 12px; text-align: left;
+    -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px);
+    transition: flex .6s cubic-bezier(.6,.05,.2,1), transform .3s;
+    overflow: hidden; cursor: pointer; min-width: 0;
+  }
+  .mini-pane:hover { flex: 2.2; background: rgba(255,255,255,.1); }
+  .mini-pane .mp-head { display: flex; align-items: center; gap: 7px; font-size: 12px; font-weight: 600; margin-bottom: 10px; white-space: nowrap; }
+  .mini-pane .mp-head .st { width: 6px; height: 6px; border-radius: 50%; background: var(--green); }
+  .mini-pane .sk { height: 7px; border-radius: 4px; background: rgba(255,255,255,.14); margin-bottom: 7px; animation: skf 2.4s infinite; }
+  .mini-pane .sk:nth-child(2n) { width: 82%; }
+  .mini-pane .sk:nth-child(3n) { width: 64%; }
+  @keyframes skf { 0%,100% { opacity: .5; } 50% { opacity: 1; } }
+
+  /* ============ 步骤 ============ */
+  .steps { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; margin-top: 52px; counter-reset: st; }
+  @media (max-width: 720px) { .steps { grid-template-columns: 1fr; } }
+  .step {
+    background: var(--card); border-radius: var(--radius); padding: 30px 26px;
+    box-shadow: 0 1px 2px rgba(0,0,0,.04), 0 0 0 1px var(--line);
+    position: relative; transition: transform .3s;
+  }
+  .step:hover { transform: translateY(-4px); }
+  .step::before {
+    counter-increment: st; content: counter(st);
+    font-size: 13px; font-weight: 700; color: var(--blue);
+    background: var(--blue-soft); width: 30px; height: 30px; border-radius: 50%;
+    display: grid; place-items: center; margin-bottom: 16px;
+  }
+  .step h3 { font-size: 17px; margin-bottom: 8px; }
+  .step p { font-size: 14px; color: var(--ink-2); line-height: 1.55; }
+  .step code {
+    display: block; margin-top: 14px; background: #0b0b0f; color: #a6e22e;
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    font-size: 12.5px; border-radius: 10px; padding: 12px 14px; overflow-x: auto;
+  }
+
+  /* ============ 站点墙 ============ */
+  .sites {
+    margin-top: 52px; display: flex; flex-wrap: wrap; justify-content: center; gap: 12px;
+    max-width: 780px; margin-left: auto; margin-right: auto;
+  }
+  .site-chip {
+    display: flex; align-items: center; gap: 9px;
+    background: #fff; border-radius: 999px; padding: 9px 18px 9px 10px;
+    box-shadow: 0 1px 2px rgba(0,0,0,.05), 0 0 0 1px var(--line);
+    font-size: 13.5px; font-weight: 500;
+    transition: transform .25s cubic-bezier(.34,1.56,.64,1), box-shadow .25s;
+    animation: chip-in .5s both;
+  }
+  .site-chip:hover { transform: translateY(-4px) scale(1.05); box-shadow: 0 12px 24px -8px rgba(0,0,0,.16); }
+  .site-chip img { width: 22px; height: 22px; }
+  @keyframes chip-in { from { opacity: 0; transform: scale(.7); } }
+
+  /* ============ 隐私条 ============ */
+  .privacy {
+    margin-top: 60px; display: flex; flex-wrap: wrap; justify-content: center; gap: 26px;
+    color: var(--ink-3); font-size: 13.5px;
+  }
+  .privacy span { display: flex; align-items: center; gap: 7px; }
+
+  /* ============ 页脚 CTA ============ */
+  footer { background: #0b0b0f; color: #f5f5f7; border-radius: 34px 34px 0 0; margin-top: 40px; }
+  footer .inner { padding: 90px 24px 46px; text-align: center; }
+  footer h2 { font-size: clamp(30px, 4.4vw, 48px); font-weight: 800; letter-spacing: -1px; }
+  footer .sub { color: #a1a1a6; margin-top: 14px; font-size: 16px; }
+  footer .btn { margin-top: 32px; background: #fff; color: #0b0b0f; }
+  footer .btn:hover { transform: translateY(-2px) scale(1.03); box-shadow: 0 12px 30px rgba(255,255,255,.18); }
+  footer .meta { margin-top: 70px; padding-top: 24px; border-top: 1px solid rgba(255,255,255,.12); color: #6e6e73; font-size: 12.5px; display: flex; justify-content: center; gap: 22px; flex-wrap: wrap; }
+  footer .meta a:hover { color: #f5f5f7; }
+
+  /* ============ 滚动浮现 ============ */
+  .rv { opacity: 0; transform: translateY(26px); transition: opacity .7s ease, transform .7s cubic-bezier(.2,.8,.3,1); }
+  .rv.on { opacity: 1; transform: none; }
+  .rv.d1 { transition-delay: .08s; } .rv.d2 { transition-delay: .16s; } .rv.d3 { transition-delay: .24s; }
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { animation: none !important; transition: none !important; }
+    .rv { opacity: 1; transform: none; }
+  }
+
+  /* 图标配色 */
+  .c-blue { background: #e8f1fd; } .c-green { background: #e9f7ef; }
+  .c-purple { background: #f0e9fd; } .c-orange { background: #fef1e4; }
+  .c-pink { background: #fdeaf1; } .c-gray { background: #f0f0f2; }
+</style>
+</head>
+<body>
+
+<!-- ================= 导航 ================= -->
+<nav>
+  <div class="wrap">
+    <a class="logo" href="#">
+      <svg viewBox="0 0 24 24"><defs><linearGradient id="lg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#0071e3"/><stop offset="1" stop-color="#7d4bff"/></linearGradient></defs><rect width="24" height="24" rx="6.5" fill="url(#lg)"/><path d="M6 8.5h9l-7 7h10" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      AI Sider
+    </a>
+    <div class="links">
+      <a href="#features">功能</a>
+      <a href="#how">安装</a>
+      <a href="#sites">站点</a>
+      <a class="nav-cta" href="https://github.com/1parado/deepseek-sider" target="_blank">GitHub</a>
+    </div>
+  </div>
+</nav>
+
+<!-- ================= Hero ================= -->
+<header class="hero">
+  <div class="wrap">
+    <span class="eyebrow rv">🧩 免费 · 开源 · 纯本地运行</span>
+    <h1 class="rv d1">侧边栏里的<br /><span class="grad">所有 AI 网页版</span></h1>
+    <p class="sub rv d2">DeepSeek、ChatGPT、Claude、Gemini…一个侧边栏全部装下。复用你的登录态，还能 <b>Ctrl 多选并排对比</b>，一问多答。</p>
+    <div class="cta-row rv d3">
+      <a class="btn btn-dark" href="https://github.com/1parado/deepseek-sider#安装chrome--edge-通用" target="_blank">免费安装 →</a>
+      <a class="btn btn-ghost" href="https://github.com/1parado/deepseek-sider" target="_blank">
+        <svg width="15" height="15" viewBox="0 0 16 16" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg>
+        查看源码
+      </a>
+    </div>
+
+    <!-- 浏览器窗框 + 扩展 1:1 复刻动画演示 -->
+    <div class="stage rv d3">
+      <div class="browser">
+        <div class="browser-bar">
+          <div class="dots"><i></i><i></i><i></i></div>
+          <div class="addr">developer.mozilla.org/zh-CN/docs/Web</div>
+        </div>
+        <div class="browser-body">
+          <div class="page-sim">
+            <div class="l1"></div>
+            <div class="l2 w90"></div><div class="l2 w80"></div><div class="l2 w65"></div>
+            <div class="l1" style="width:38%;margin-top:26px"></div>
+            <div class="l2 w90"></div><div class="l2 w80"></div>
+          </div>
+          <div class="ext">
+            <div class="ext-bar" id="extBar"></div>
+            <div class="ext-view single" id="extView">
+              <div class="ext-pane pane-a">
+                <div class="ext-head"><span class="ic" data-ic="a"></span><span class="nm">DeepSeek</span><span class="alive"></span><span class="x">✕</span></div>
+                <div class="ext-chat" id="chatA"></div>
+                <div class="ext-input">问我任何问题…<span class="snd">➤</span></div>
+              </div>
+              <div class="ext-pane pane-b">
+                <div class="ext-head"><span class="ic" data-ic="b"></span><span class="nm">Claude</span><span class="alive"></span><span class="x">✕</span></div>
+                <div class="ext-chat" id="chatB"></div>
+                <div class="ext-input">问我任何问题…<span class="snd">➤</span></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="demo-badge"><span class="dot"></span><span id="demoLabel">正在演示：侧边栏打开 DeepSeek，回答页面选中的问题</span></div>
+    </div>
+  </div>
+</header>
+
+<!-- ================= 功能 ================= -->
+<section id="features">
+  <div class="wrap">
+    <h2 class="sec-title rv">为「一边干活一边问 AI」设计</h2>
+    <p class="sec-sub rv d1">不打断你正在看的页面，AI 常驻右侧，随叫随到。</p>
+
+    <div class="grid">
+      <div class="card rv">
+        <div class="fi c-blue">🧲</div>
+        <h3>AI 一下</h3>
+        <p>在任意网页选中文字 → 右键 →「AI 一下」，侧边栏自动打开并把内容连同页面标题一起填进输入框，接着问就行。</p>
+      </div>
+      <div class="card rv d1">
+        <div class="fi c-green">⇄</div>
+        <h3>多 AI 并排对比</h3>
+        <p>按住 <span class="kx">Ctrl</span> 点 2~4 个图标，分栏并排展示、一问多答。拖动分隔条自由调宽度，布局会记住。</p>
+      </div>
+      <div class="card rv d2">
+        <div class="fi c-purple">🔄</div>
+        <h3>会话各自保留</h3>
+        <p>图标栏点谁用谁，各站点会话独立保存——切走再切回来，上下文原样还在。</p>
+      </div>
+      <div class="card rv">
+        <div class="fi c-orange">🪟</div>
+        <h3>独立小窗兜底</h3>
+        <p>站点拒绝内嵌（如 ChatGPT）？一键弹出 430px 贴边小窗继续用，登录态照样共享。</p>
+      </div>
+      <div class="card rv d1">
+        <div class="fi c-pink">🧩</div>
+        <h3>任意站点自定义</h3>
+        <p>顶栏 <span class="kx">＋</span> 添加任何 AI 网页版，favicon 自动抓取；顶栏图标支持拖拽排序。</p>
+      </div>
+      <div class="card rv d2">
+        <div class="fi c-gray">⌨️</div>
+        <h3>键盘顺手</h3>
+        <p><span class="kx">Ctrl+1~4</span> 快速多选、<span class="kx">Esc</span> 退出对比、双击分隔条复位均分，全程手不离键盘。</p>
+      </div>
+    </div>
+
+    <!-- 深色对比大卡 -->
+    <div class="dark-card rv">
+      <h3>同一个问题，谁的答案更好？</h3>
+      <p>把问题同时抛给多个 AI，悬停放大任意一栏细看。</p>
+      <div class="mini-compare">
+        <div class="mini-pane"><div class="mp-head"><span class="st"></span>DeepSeek</div><div class="sk"></div><div class="sk"></div><div class="sk"></div><div class="sk"></div><div class="sk"></div></div>
+        <div class="mini-pane"><div class="mp-head"><span class="st"></span>ChatGPT</div><div class="sk"></div><div class="sk"></div><div class="sk"></div><div class="sk"></div><div class="sk"></div></div>
+        <div class="mini-pane"><div class="mp-head"><span class="st"></span>Claude</div><div class="sk"></div><div class="sk"></div><div class="sk"></div><div class="sk"></div><div class="sk"></div></div>
+        <div class="mini-pane"><div class="mp-head"><span class="st"></span>Gemini</div><div class="sk"></div><div class="sk"></div><div class="sk"></div><div class="sk"></div><div class="sk"></div></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ================= 站点 ================= -->
+<section id="sites" style="padding-top:20px">
+  <div class="wrap">
+    <h2 class="sec-title rv">17 个主流 AI，开箱即用</h2>
+    <p class="sec-sub rv d1">还支持添加任意 AI 网页版（智谱清言、文心一言、Poe bot…）</p>
+    <div class="sites" id="siteWall"></div>
+    <div class="privacy rv">
+      <span>🔒 无账号体系</span><span>📵 不收集任何数据</span><span>🏠 纯本地实现</span><span>⚖️ MIT 开源</span>
+    </div>
+  </div>
+</section>
+
+<!-- ================= 安装 ================= -->
+<section id="how" style="padding-top:20px">
+  <div class="wrap">
+    <h2 class="sec-title rv">三步装好</h2>
+    <p class="sec-sub rv d1">需要 Chrome / Edge 114 及以上版本</p>
+    <div class="steps">
+      <div class="step rv">
+        <h3>克隆仓库</h3>
+        <p>把扩展源码拉到本地任意目录。</p>
+        <code>git clone https://github.com/1parado/deepseek-sider.git</code>
+      </div>
+      <div class="step rv d1">
+        <h3>加载扩展</h3>
+        <p>打开 <b>chrome://extensions/</b>，开启右上角「开发者模式」，点「加载已解压的扩展程序」，选择克隆出的文件夹。</p>
+      </div>
+      <div class="step rv d2">
+        <h3>登录一次即可</h3>
+        <p>点工具栏图标打开侧边栏，选一个 AI 登录——共用浏览器 cookie，真实标签页和侧边栏共享登录态。</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ================= 页脚 ================= -->
+<footer>
+  <div class="inner">
+    <h2>让 AI 住进侧边栏</h2>
+    <p class="sub">免费开源，两分钟装好，从此换 Tab 问 AI 的日子结束了。</p>
+    <a class="btn" href="https://github.com/1parado/deepseek-sider#安装chrome--edge-通用" target="_blank">立即安装 AI Sider</a>
+    <div class="meta">
+      <a href="https://github.com/1parado/deepseek-sider" target="_blank">GitHub</a>
+      <a href="https://github.com/1parado/deepseek-sider/issues" target="_blank">反馈问题</a>
+      <span>与文中提及的各 AI 服务官方均无关联</span>
+      <span>MIT License</span>
+    </div>
+  </div>
+</footer>
+
+<script>
+/* ============ 图标库 ============ */
+const ICONS = {
+  deepseek: "https://api.iconify.design/logos:deepseek.svg",
+  chatgpt: "https://api.iconify.design/logos:openai.svg",
+  claude: "https://api.iconify.design/logos:claude-icon.svg",
+  gemini: "https://api.iconify.design/logos:google-gemini.svg",
+  grok: "https://api.iconify.design/simple-icons:x.svg",
+  doubao: "https://api.iconify.design/thesvg-color:doubao.svg",
+  kimi: "https://api.iconify.design/simple-icons:kimi.svg",
+  zhipu: "https://api.iconify.design/thesvg-color:zhipu.svg",
+  qianwen: "https://api.iconify.design/simple-icons:alibabacloud.svg",
+  perplexity: "https://api.iconify.design/simple-icons:perplexity.svg",
+  copilot: "https://api.iconify.design/logos:github-copilot.svg",
+  poe: "https://api.iconify.design/simple-icons:poe.svg",
+  mistral: "https://api.iconify.design/simple-icons:mistralai.svg",
+  huggingchat: "https://api.iconify.design/logos:hugging-face.svg",
+};
+const ic = (n) => `<img src="${ICONS[n]}" alt="" loading="lazy" />`;
+
+/* ============ 站点墙 ============ */
+const SITES = [
+  ["deepseek","DeepSeek"],["chatgpt","ChatGPT"],["claude","Claude"],["gemini","Gemini"],
+  ["grok","Grok"],["doubao","豆包"],["kimi","Kimi"],["zhipu","智谱清言"],["qianwen","通义千问"],
+  ["perplexity","Perplexity"],["copilot","Copilot"],["poe","Poe"],["mistral","Le Chat"],
+  ["huggingchat","HuggingChat"],
+];
+const wall = document.getElementById("siteWall");
+SITES.forEach(([k, name], i) => {
+  const chip = document.createElement("span");
+  chip.className = "site-chip";
+  chip.style.animationDelay = i * 45 + "ms";
+  chip.innerHTML = ic(k) + name;
+  wall.appendChild(chip);
+});
+
+/* ============ Hero 扩展复刻：自动演示 ============ */
+const BAR = [
+  { id: "deepseek", sel: false }, { id: "chatgpt" }, { id: "claude", sel: false },
+  { id: "gemini" }, { id: "grok" }, { id: "doubao" }, { id: "kimi" },
+];
+const extBar = document.getElementById("extBar");
+const extView = document.getElementById("extView");
+const demoLabel = document.getElementById("demoLabel");
+const chatA = document.getElementById("chatA");
+const chatB = document.getElementById("chatB");
+
+BAR.forEach((t) => {
+  const b = document.createElement("span");
+  b.className = "ext-tab";
+  b.dataset.k = t.id;
+  b.innerHTML = ic(t.id);
+  extBar.appendChild(b);
+});
+const add = document.createElement("span");
+add.className = "ext-tab add"; add.textContent = "＋";
+extBar.appendChild(add);
+const actions = document.createElement("span");
+actions.className = "ext-actions"; actions.innerHTML = "<span>⧉</span><span>＋</span>";
+extBar.appendChild(actions);
+
+const setTabState = (k, cls) => {
+  const el = extBar.querySelector(`[data-k="${k}"]`);
+  if (el) el.classList.add(cls);
+};
+const clearTabs = () => extBar.querySelectorAll(".ext-tab").forEach((e) => e.classList.remove("cur", "sel"));
+const setHeads = () => {
+  const a = extView.querySelector(".pane-a .ic"), b = extView.querySelector(".pane-b .ic");
+  const ka = extView.dataset.a, kb = extView.dataset.b;
+  a.innerHTML = ic(ka); b.innerHTML = ic(kb);
+  extView.querySelector(".pane-a .nm").textContent = NAMES[ka] || ka;
+  extView.querySelector(".pane-b .nm").textContent = NAMES[kb] || kb;
+};
+const NAMES = Object.fromEntries(SITES);
+
+function bubble(box, cls, html, typing) {
+  const d = document.createElement("div");
+  d.className = "bubble " + cls;
+  d.innerHTML = typing ? '<span class="typing"><i></i><i></i><i></i></span>' : html;
+  box.appendChild(d);
+  box.scrollTop = box.scrollHeight;
+  return d;
+}
+
+async function wait(ms) { return new Promise((r) => setTimeout(r, ms)); }
+
+async function phaseSingle() {
+  extView.classList.add("single");
+  extView.dataset.a = "deepseek";
+  setHeads();
+  chatA.innerHTML = "";
+  clearTabs(); setTabState("deepseek", "cur");
+  demoLabel.textContent = "正在演示：选中网页文字，右键「AI 一下」→ 内容自动填入侧边栏";
+  await wait(600);
+  bubble(chatA, "q", "什么是 CSS 的 stacking context？", false);
+  await wait(900);
+  const a = bubble(chatA, "a", "", true);
+  await wait(1600);
+  a.innerHTML = " stacking context 是一套层叠规则，由 opacity&lt;1、transform… 触发。你可以结合我正在看的 MDN 页面继续展开讲讲吗？";
+  bubble(chatA, "a", "", true);
+  demoLabel.textContent = "正在演示：按住 Ctrl 点 Claude → 两栏并排对比";
+  await wait(1800);
+}
+async function phaseSplit() {
+  setTabState("claude", "sel");
+  extView.dataset.b = "claude";
+  setHeads();
+  extView.classList.remove("single");
+  chatA.innerHTML = ""; chatB.innerHTML = "";
+  bubble(chatA, "q", "什么是 CSS 的 stacking context？");
+  await wait(500);
+  bubble(chatB, "q", "什么是 CSS 的 stacking context？");
+  await wait(900);
+  bubble(chatA, "a", "", true);
+  bubble(chatB, "a", "", true);
+  await wait(2200);
+  chatA.lastChild.innerHTML = " stacking context 由 transform、filter 等属性创建，影响 z-index 的比较范围…";
+  chatB.lastChild.innerHTML = " 简单说：它给元素划了块「独立排序区」，内部的 z-index 不会越出去比较…";
+  demoLabel.textContent = "正在演示：一问多答，拖动分隔条调整宽度";
+  await wait(2400);
+  const pa = extView.querySelector(".pane-a"), pb = extView.querySelector(".pane-b");
+  pa.style.flex = "1.6"; pb.style.flex = "1";
+  await wait(1600);
+  pa.style.flex = "1"; pb.style.flex = "1.6";
+  await wait(1800);
+  pa.style.flex = ""; pb.style.flex = "";
+}
+(async () => {
+  const reduced = matchMedia("(prefers-reduced-motion: reduce)").matches;
+  if (reduced) return;
+  while (true) {
+    await phaseSingle();
+    await phaseSplit();
+    await wait(1200);
+    extView.classList.add("single");
+    extView.querySelector(".pane-b").style.cssText = "";
+  }
+})();
+
+/* ============ 滚动浮现 ============ */
+const io = new IntersectionObserver(
+  (es) => es.forEach((e) => e.isIntersecting && e.target.classList.add("on")),
+  { threshold: 0.12 }
+);
+document.querySelectorAll(".rv").forEach((el) => io.observe(el));
+</script>
+</body>
+</html>
