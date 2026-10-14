@@ -2,7 +2,7 @@
 <html lang="zh-CN">
 <head>
   <meta charset="UTF-8" />
-  <title>DeepSeek</title>
+  <title>AI Sider</title>
   <style>
     html,
     body {
@@ -14,21 +14,863 @@
       background: #fff;
       color: #1c1f23;
     }
-    #chat-view {
+    #app {
+      display: flex;
+      flex-direction: column;
       height: 100%;
-      position: relative;
     }
-    #chat-view iframe {
-      display: block;
+
+    /* ---------- 顶部站点栏 ---------- */
+    #bar {
+      flex: none;
+      display: flex;
+      align-items: flex-start;
+      gap: 2px;
+      padding: 6px 8px;
+      border-bottom: 1px solid #ececec;
+      background: #fafafa;
+    }
+    /* 站点多时顶栏换行，高度自适应；内容区自动让位 */
+    #tabs {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 2px;
+      max-height: 92px; /* 最多两行，再多点开管理面板找 */
+      overflow-y: auto;
+      flex: 1;
+      min-width: 0;
+    }
+    #tabs::-webkit-scrollbar {
+      width: 4px;
+    }
+    #tabs::-webkit-scrollbar-thumb {
+      background: #ddd;
+      border-radius: 2px;
+    }
+    .site-tab {
+      width: 30px;
+      height: 30px;
+      flex: none;
+      border: none;
+      border-radius: 8px;
+      background: transparent;
+      cursor: pointer;
+      padding: 6px;
+      opacity: 0.45;
+      position: relative;
+      transition: background 0.15s, opacity 0.15s, transform 0.15s cubic-bezier(0.34, 1.56, 0.64, 1);
+    }
+    .site-tab:hover {
+      background: #ececec;
+      opacity: 0.85;
+      transform: translateY(-1px);
+    }
+    .site-tab:active {
+      transform: scale(0.92);
+    }
+    /* 拖拽排序态 */
+    .site-tab.dragging {
+      opacity: 0.35;
+      transform: scale(0.9);
+      cursor: grabbing;
+    }
+    .site-tab {
+      cursor: grab;
+    }
+    .site-tab.current {
+      opacity: 1;
+      background: #e3edfd;
+    }
+    /* 多选选中态：右上角小绿点 + 弹入动画 */
+    .site-tab.selected {
+      opacity: 1;
+      background: #e9f7ef;
+    }
+    /* Ctrl 按住时：未选中图标浮现「+」角标，暗示可多选 */
+    .site-tab::before {
+      content: "+";
+      position: absolute;
+      top: -3px;
+      right: -3px;
+      width: 13px;
+      height: 13px;
+      border-radius: 50%;
+      background: #4285f4;
+      color: #fff;
+      font-size: 10px;
+      font-weight: 700;
+      line-height: 13px;
+      text-align: center;
+      opacity: 0;
+      transform: scale(0.4);
+      transition: opacity 0.15s, transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1);
+      pointer-events: none;
+      z-index: 2;
+    }
+    #tabs.ctrl-mode .site-tab:not(.selected)::before {
+      opacity: 1;
+      transform: scale(1);
+    }
+    .site-tab.selected::after {
+      content: "";
+      position: absolute;
+      top: 3px;
+      right: 3px;
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: #34a853;
+      animation: pop-in 0.25s cubic-bezier(0.34, 1.56, 0.64, 1);
+    }
+    @keyframes pop-in {
+      from {
+        transform: scale(0);
+      }
+      to {
+        transform: scale(1);
+      }
+    }
+    .site-tab img,
+    .site-tab .letter {
       width: 100%;
       height: 100%;
+      object-fit: contain;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      pointer-events: none;
+    }
+    /* 图标三级兜底的末级：首字母色块 */
+    .letter {
+      border-radius: 6px;
+      color: #fff;
+      font-size: 12px;
+      font-weight: 600;
+      user-select: none;
+    }
+    #bar-spacer {
+      flex: 1;
+    }
+    #bar-actions {
+      display: flex;
+      align-items: center;
+      gap: 2px;
+      flex: none;
+      padding-top: 1px;
+    }
+    .bar-btn {
+      width: 28px;
+      height: 28px;
+      flex: none;
       border: none;
+      border-radius: 7px;
+      background: transparent;
+      cursor: pointer;
+      color: #7a7f86;
+      font-size: 15px;
+      line-height: 1;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: background 0.15s, color 0.15s, transform 0.15s;
+    }
+    .bar-btn:hover {
+      background: #ececec;
+      color: #1c1f23;
+    }
+    .bar-btn:active {
+      transform: scale(0.9);
+    }
+    a.bar-btn {
+      text-decoration: none;
+    }
+    a.bar-btn svg {
+      display: block;
+    }
+    /* 对比中提示：图标胶囊组，取代纯文本「对比中：A / B / C」 */
+    #hint {
+      display: none;
+      align-items: center;
+      gap: 4px;
+      margin-right: 6px;
+      white-space: nowrap;
+      max-width: 260px;
+      overflow: hidden;
+      animation: fade-in 0.2s;
+    }
+    #hint.show {
+      display: flex;
+    }
+    #hint .hint-label {
+      font-size: 11px;
+      color: #9aa0a6;
+      margin-right: 2px;
+      flex: none;
+    }
+    #hint .hint-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      font-size: 11px;
+      color: #3c4043;
+      background: #eef1f5;
+      border-radius: 999px;
+      padding: 2px 8px 2px 4px;
+      min-width: 0;
+      animation: pop-in 0.25s cubic-bezier(0.34, 1.56, 0.64, 1);
+    }
+    #hint .hint-chip img,
+    #hint .hint-chip .letter {
+      width: 14px;
+      height: 14px;
+      object-fit: contain;
+      border-radius: 50%;
+      flex: none;
+    }
+    #hint .hint-chip .letter {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: #fff;
+      font-size: 8px;
+      font-weight: 600;
+    }
+    #hint .hint-chip span:last-child {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      max-width: 72px;
+    }
+    @keyframes fade-in {
+      from {
+        opacity: 0;
+      }
+    }
+
+    /* ---------- 内容区：单站点 / 多选可拖拽分栏 ---------- */
+    #view {
+      flex: 1;
+      position: relative;
+      min-height: 0;
+      display: flex;
+    }
+    /* 面板宽度由 flex-grow 权重（权重 = 持久化的宽度比例 × 100）驱动 */
+    .pane {
+      flex: 1 1 0;
+      min-width: 0;
+      position: relative;
+      display: flex;
+      flex-direction: column;
+      min-width: 160px; /* 拖拽下限，保证可读 */
+      animation: pane-in 0.28s cubic-bezier(0.34, 1.56, 0.64, 1);
+    }
+    @keyframes pane-in {
+      from {
+        opacity: 0;
+        transform: translateY(6px) scale(0.99);
+      }
+    }
+    .pane iframe {
+      flex: 1;
+      display: block;
+      width: 100%;
+      border: none;
+      min-height: 0;
+    }
+    .pane-head {
+      flex: none;
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      padding: 4px 8px;
+      font-size: 11px;
+      color: #5f6368;
+      background: #fafafa;
+      border-bottom: 1px solid #f0f0f0;
+    }
+    .pane-head img,
+    .pane-head .letter {
+      width: 14px;
+      height: 14px;
+      object-fit: contain;
+      font-size: 9px;
+      border-radius: 3px;
+    }
+    .pane-head .letter {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .pane-head .pane-close {
+      margin-left: auto;
+      border: none;
+      background: none;
+      cursor: pointer;
+      color: #9aa0a6;
+      font-size: 12px;
+      padding: 0 2px;
+      line-height: 1;
+      transition: color 0.12s, transform 0.12s;
+    }
+    .pane-head .pane-close:hover {
+      color: #d93025;
+      transform: scale(1.15);
+    }
+    /* 面板级弹出按钮：与 ✕ 同风格，hover 变蓝 */
+    .pane-head .pane-pop {
+      margin-left: auto;
+      border: none;
+      background: none;
+      cursor: pointer;
+      color: #9aa0a6;
+      font-size: 12px;
+      padding: 0 3px;
+      line-height: 1;
+      transition: color 0.12s, transform 0.12s;
+    }
+    .pane-head .pane-pop:hover {
+      color: #4285f4;
+      transform: scale(1.15);
+    }
+    .pane-head .pane-close {
+      margin-left: 0;
+    }
+    /* 面板存活点：绿=桥心跳正常，灰=未见心跳（可能需登录/脚本未注入） */
+    .pane-head .alive {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: #dadce0;
+      flex: none;
+      transition: background 0.3s;
+    }
+    .pane-head .alive.ok {
+      background: #34a853;
+    }
+    /* 多选面板头警告：iframe 迟迟未 load */
+    .pane-head .warn-embed {
+      display: none;
+      flex: none;
+      color: #f4b400;
+      font-size: 11px;
+      cursor: help;
+      margin-left: -2px;
+    }
+    .pane.warn .pane-head .warn-embed {
+      display: inline;
+    }
+
+    /* ---------- 拖拽分隔条 ---------- */
+    .splitter {
+      flex: none;
+      width: 6px;
+      margin: 0 -3px; /* 负边距叠在面板边缘，不占布局宽 */
+      z-index: 3;
+      cursor: col-resize;
+      position: relative;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .splitter::before {
+      content: "";
+      width: 2px;
+      height: 28px;
+      border-radius: 1px;
+      background: #d9dbde;
+      transition: background 0.15s, height 0.15s;
+    }
+    /* hover 时整条分隔线浮现（不只中间 28px），更容易发现可拖 */
+    .splitter::after {
+      content: "";
+      position: absolute;
+      inset: 0;
+      border-left: 2px solid transparent;
+      transition: border-color 0.15s;
+      pointer-events: none;
+    }
+    .splitter:hover::before,
+    .splitter.active::before {
+      background: #4285f4;
+      height: 44px;
+    }
+    .splitter:hover::after,
+    .splitter.active::after {
+      border-left-color: rgba(66, 133, 244, 0.25);
+    }
+    .splitter.active::before {
+      box-shadow: 0 0 0 3px rgba(66, 133, 244, 0.15);
+    }
+    /* 拖拽中：全局禁 iframe 命中 + 文本选择，光标全局锁定 */
+    body.dragging {
+      cursor: col-resize;
+      user-select: none;
+    }
+    body.dragging iframe {
+      pointer-events: none;
+    }
+    body.dragging .pane {
+      animation: none;
+    }
+
+    /* ---------- iframe 加载 spinner ---------- */
+    .pane .loading {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: #fff;
+      z-index: 2;
+      animation: fade-in 0.2s;
+      transition: opacity 0.3s;
+    }
+    .pane .loading.done {
+      opacity: 0;
+      pointer-events: none;
+    }
+    .loading .spinner {
+      width: 26px;
+      height: 26px;
+      border: 3px solid #e8eaed;
+      border-top-color: #4285f4;
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+    }
+    @keyframes spin {
+      to {
+        transform: rotate(360deg);
+      }
+    }
+
+    /* ---------- toast ---------- */
+    #toast {
+      position: fixed;
+      left: 50%;
+      bottom: 18px;
+      transform: translate(-50%, 8px);
+      background: rgba(28, 31, 35, 0.92);
+      color: #fff;
+      font-size: 12px;
+      padding: 8px 14px;
+      border-radius: 8px;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.2s, transform 0.2s;
+      z-index: 50;
+      max-width: 80%;
+    }
+    #toast.show {
+      opacity: 1;
+      transform: translate(-50%, 0);
+    }
+
+    /* ---------- 单站点慢载提示条（不遮内容，可点关闭） ---------- */
+    #slow-banner {
+      position: fixed;
+      left: 50%;
+      bottom: 18px;
+      transform: translate(-50%, 8px);
+      background: rgba(28, 31, 35, 0.88);
+      color: #fff;
+      font-size: 12px;
+      padding: 8px 14px;
+      border-radius: 8px;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.2s, transform 0.2s;
+      z-index: 49;
+      max-width: 85%;
+      display: none;
+    }
+    #slow-banner.show {
+      display: block;
+      opacity: 1;
+      transform: translate(-50%, 0);
+      pointer-events: auto;
+    }
+    #slow-banner kbd {
+      background: rgba(255, 255, 255, 0.16);
+      border-radius: 3px;
+      padding: 0 4px;
+    }
+    #slow-banner .sb-close {
+      margin-left: 10px;
+      border: none;
+      background: none;
+      color: rgba(255, 255, 255, 0.7);
+      cursor: pointer;
+      font-size: 12px;
+      padding: 0 2px;
+    }
+    #slow-banner .sb-close:hover {
+      color: #fff;
+    }
+
+    /* ---------- 空态 / 提示 ---------- */
+    .overlay {
+      position: absolute;
+      inset: 0;
+      display: none;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 12px;
+      text-align: center;
+      padding: 24px;
+      background: #fff;
+      z-index: 5;
+    }
+    .overlay.show {
+      display: flex;
+      animation: fade-in 0.25s;
+    }
+    .overlay img {
+      width: 44px;
+      height: 44px;
+      border-radius: 10px;
+    }
+    .overlay h1 {
+      font-size: 16px;
+      margin: 0;
+    }
+    .overlay p {
+      font-size: 13px;
+      color: #7a7f86;
+      margin: 0;
+      max-width: 340px;
+      line-height: 1.7;
+    }
+    .overlay kbd {
+      background: #f2f3f5;
+      border: 1px solid #dcdfe3;
+      border-bottom-width: 2px;
+      border-radius: 4px;
+      padding: 1px 5px;
+      font-size: 12px;
+    }
+
+    /* ---------- 管理面板 ---------- */
+    #manage {
+      position: absolute;
+      inset: 0;
+      z-index: 20;
+      display: none;
+      flex-direction: column;
+      background: #fff;
+    }
+    #manage.show {
+      display: flex;
+      animation: manage-in 0.22s cubic-bezier(0.2, 0.8, 0.3, 1);
+    }
+    @keyframes manage-in {
+      from {
+        opacity: 0;
+        transform: translateY(14px) scale(0.99);
+      }
+    }
+    .manage-head {
+      flex: none;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 10px 14px;
+      border-bottom: 1px solid #ececec;
+    }
+    .manage-head h2 {
+      font-size: 14px;
+      margin: 0;
+      flex: 1;
+    }
+    .manage-head .btn-text {
+      border: none;
+      background: none;
+      color: #7a7f86;
+      cursor: pointer;
+      font-size: 12px;
+      padding: 4px 6px;
+      border-radius: 6px;
+      transition: background 0.12s, color 0.12s;
+    }
+    .manage-head .btn-text:hover {
+      background: #f2f3f5;
+      color: #1c1f23;
+    }
+    #site-list {
+      flex: 1;
+      overflow-y: auto;
+      padding: 6px 10px 12px;
+    }
+    .site-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 8px 8px;
+      border-radius: 10px;
+      transition: background 0.12s;
+      animation: row-in 0.25s both;
+    }
+    /* 行级联入场：JS 设定 --i，逐行错开 30ms */
+    @keyframes row-in {
+      from {
+        opacity: 0;
+        transform: translateX(8px);
+      }
+    }
+    .site-row:hover {
+      background: #f6f7f8;
+    }
+    .site-row .row-icon {
+      width: 26px;
+      height: 26px;
+      flex: none;
+      object-fit: contain;
+    }
+    .site-row .row-icon.letter {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: #fff;
+      font-size: 13px;
+      font-weight: 600;
+      border-radius: 7px;
+      user-select: none;
+    }
+    .site-row .row-main {
+      flex: 1;
+      min-width: 0;
+    }
+    .site-row .row-name {
+      font-size: 13px;
+      line-height: 1.3;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .site-row .row-url {
+      font-size: 11px;
+      color: #9aa0a6;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .tag {
+      flex: none;
+      font-size: 10px;
+      padding: 1px 6px;
+      border-radius: 8px;
+      background: #f2f3f5;
+      color: #9aa0a6;
+    }
+    .tag.risky {
+      background: #fdeeee;
+      color: #d93025;
+    }
+    .site-row .row-btn {
+      flex: none;
+      width: 26px;
+      height: 26px;
+      border: none;
+      border-radius: 7px;
+      background: none;
+      cursor: pointer;
+      color: #9aa0a6;
+      font-size: 13px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: background 0.12s, color 0.12s, transform 0.12s;
+    }
+    .site-row .row-btn:hover {
+      background: #e8eaed;
+      color: #1c1f23;
+      transform: scale(1.1);
+    }
+    .site-row .row-btn.danger:hover {
+      background: #fdeeee;
+      color: #d93025;
+    }
+    /* 删除时的退场动画 */
+    .site-row.removing {
+      animation: row-out 0.18s both;
+    }
+    @keyframes row-out {
+      to {
+        opacity: 0;
+        transform: translateX(16px);
+      }
+    }
+
+    /* ---------- 新增/编辑表单 ---------- */
+    #site-form {
+      flex: none;
+      display: none;
+      flex-direction: column;
+      gap: 8px;
+      padding: 12px 14px;
+      border-top: 1px solid #ececec;
+      background: #fafafa;
+    }
+    #site-form.show {
+      display: flex;
+      animation: form-in 0.2s cubic-bezier(0.2, 0.8, 0.3, 1);
+    }
+    @keyframes form-in {
+      from {
+        opacity: 0;
+        transform: translateY(10px);
+      }
+    }
+    #site-form input {
+      width: 100%;
+      box-sizing: border-box;
+      border: 1px solid #dcdfe3;
+      border-radius: 8px;
+      padding: 7px 10px;
+      font-size: 13px;
+      font-family: inherit;
+      outline: none;
+      transition: border-color 0.15s, box-shadow 0.15s;
+    }
+    /* 网址即时预览：favicon + 解析后域名 */
+    #url-preview {
+      display: none;
+      align-items: center;
+      gap: 8px;
+      font-size: 12px;
+      color: #5f6368;
+      padding: 0 2px;
+    }
+    #url-preview.show {
+      display: flex;
+      animation: fade-in 0.2s;
+    }
+    #url-preview img,
+    #url-preview .letter {
+      width: 18px;
+      height: 18px;
+      object-fit: contain;
+      border-radius: 4px;
+      flex: none;
+    }
+    #url-preview .letter {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: #fff;
+      font-size: 10px;
+      font-weight: 600;
+    }
+    #site-form input:focus {
+      border-color: #4285f4;
+      box-shadow: 0 0 0 3px rgba(66, 133, 244, 0.12);
+    }
+    #site-form .form-btns {
+      display: flex;
+      gap: 8px;
+      justify-content: flex-end;
+    }
+    #site-form button {
+      border: none;
+      border-radius: 8px;
+      padding: 7px 16px;
+      font-size: 13px;
+      cursor: pointer;
+      transition: background 0.15s, transform 0.1s;
+    }
+    #site-form button:active {
+      transform: scale(0.96);
+    }
+    #form-save {
+      background: #4285f4;
+      color: #fff;
+    }
+    #form-save:hover {
+      background: #3367d6;
+    }
+    #form-cancel {
+      background: #ececec;
+      color: #5f6368;
+    }
+    #form-cancel:hover {
+      background: #e0e2e5;
+    }
+    #form-error {
+      font-size: 12px;
+      color: #d93025;
+      display: none;
+      animation: shake 0.3s;
+    }
+    @keyframes shake {
+      0%, 100% {
+        transform: translateX(0);
+      }
+      25% {
+        transform: translateX(-4px);
+      }
+      75% {
+        transform: translateX(4px);
+      }
+    }
+
+    /* 减少动效偏好：全部动效降级为无 */
+    @media (prefers-reduced-motion: reduce) {
+      *,
+      *::before,
+      *::after {
+        animation-duration: 0.01ms !important;
+        transition-duration: 0.01ms !important;
+      }
     }
   </style>
 </head>
 <body>
-  <div id="chat-view">
-    <iframe src="https://chat.deepseek.com/" allow="clipboard-read; clipboard-write"></iframe>
+  <div id="app">
+    <div id="bar">
+      <div id="tabs"></div>
+      <div id="bar-spacer"></div>
+      <div id="bar-actions">
+        <span id="hint"></span>
+        <a class="bar-btn" href="https://github.com/1parado/deepseek-sider" target="_blank" title="GitHub 仓库" aria-label="GitHub 仓库">
+          <svg width="15" height="15" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+            <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8z"/>
+          </svg>
+        </a>
+        <button class="bar-btn" id="add-btn" title="添加 / 管理 AI 站点">＋</button>
+        <button class="bar-btn" id="popout-btn" title="将当前站点弹出为独立小窗">⧉</button>
+      </div>
+    </div>
+    <div id="view">
+      <div class="overlay" id="empty-state">
+        <img src="/icons/ai/deepseek.svg" alt="" />
+        <h1>AI Sider</h1>
+        <p id="empty-text">点上方图标使用对应 AI，<b>Ctrl+点击</b>可多选并排对比。<br />在网页选中文字右键「<b>AI 一下</b>」可一键提问。</p>
+        <p id="empty-hint" style="display:none">该站点拒绝内嵌，点 <kbd>⧉</kbd> 用独立小窗打开。</p>
+      </div>
+
+      <div id="manage">
+        <div class="manage-head">
+          <h2>管理 AI 站点</h2>
+          <button class="btn-text" id="reset-btn" title="清空自定义，恢复出厂清单">恢复默认</button>
+          <button class="btn-text" id="close-manage">完成</button>
+        </div>
+        <div id="site-list"></div>
+        <div id="site-form">
+          <input id="form-name" placeholder="名称，如：智谱清言" maxlength="24" />
+          <input id="form-url" placeholder="网址，如：chatglm.cn（可省略 https://）" />
+          <div id="url-preview"></div>
+          <div id="form-error"></div>
+          <div class="form-btns">
+            <button id="form-cancel">取消</button>
+            <button id="form-save">保存</button>
+          </div>
+        </div>
+      </div>
+    </div>
   </div>
+  <div id="toast"></div>
+  <div id="slow-banner">加载较慢，可能被站点拒绝内嵌？点 <kbd>⧉</kbd> 用独立小窗打开。<button class="sb-close" title="关闭提示">✕</button></div>
+
+  <script src="../shared/ai-sites.js"></script>
+  <script src="sidepanel.js"></script>
 </body>
 </html>
