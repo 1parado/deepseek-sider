@@ -20,6 +20,7 @@ const BUILTIN_AI_SITES = [
   { id: "grok", name: "Grok", url: "https://grok.com/", icon: "/icons/ai/grok.svg", chat: "grok" },
   { id: "doubao", name: "豆包", url: "https://www.doubao.com/chat/", icon: "/icons/ai/doubao.svg", chat: "doubao" },
   { id: "kimi", name: "Kimi", url: "https://www.kimi.com/", icon: "/icons/ai/kimi.svg", chat: "kimi" },
+  { id: "zhipu", name: "智谱清言", url: "https://chatglm.cn/", icon: "/icons/ai/zhipu.svg", chat: "zhipu" },
   { id: "qianwen", name: "通义千问", url: "https://www.qianwen.com/", icon: "/icons/ai/qianwen.png", chat: "qwen" },
   { id: "yuanbao", name: "腾讯元宝", url: "https://yuanbao.tencent.com/chat", icon: "/icons/ai/yuanbao.png", chat: "yuanbao" },
   { id: "perplexity", name: "Perplexity", url: "https://www.perplexity.ai/", icon: "/icons/ai/perplexity.svg", chat: "perplexity" },

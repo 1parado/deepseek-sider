@@ -46,6 +46,7 @@ git clone https://github.com/1parado/deepseek-sider.git
 | Grok | grok.com | |
 | 豆包 | doubao.com | |
 | Kimi | kimi.com | |
+| 智谱清言 | chatglm.cn | |
 | 通义千问 | qianwen.com | 通义已从 tongyi.com 迁移至该域名 |
 | 腾讯元宝 | yuanbao.tencent.com | |
 | Perplexity | perplexity.ai | |

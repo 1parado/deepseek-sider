@@ -160,9 +160,16 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     return true;
   }
 
+  // ---- 侧边栏 iframe 内点击的外链：开真实标签页（防面板整页跳走） ----
+  if (msg.type === "DS_OPEN_IN_TAB") {
+    if (typeof msg.url === "string" && /^https?:\/\//i.test(msg.url)) {
+      chrome.tabs.create({ url: msg.url });
+    }
+    return;
+  }
+
   // ---- 来自 AI 页面桥的协议指令 ----
-  if (msg.type === "DS_BRIDGE_CMD") {
-    handleCommand(msg.command)
+  if (msg.type === "DS_BRIDGE_CMD") {    handleCommand(msg.command)
       .then(sendResponse)
       .catch((e) => sendResponse({ ok: false, error: String(e && e.message ? e.message : e) }));
     return true; // 异步响应

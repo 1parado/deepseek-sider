@@ -31,6 +31,8 @@ const formSave = document.getElementById("form-save");
 const formCancel = document.getElementById("form-cancel");
 const resetBtn = document.getElementById("reset-btn");
 const closeManage = document.getElementById("close-manage");
+const moreBtn = document.getElementById("more-btn");
+const moreMenu = document.getElementById("more-menu");
 
 const MAX_SITES = 30; // 顶栏最多承载的站点数（防失控）
 const MAX_COMPARE = 4; // 侧边栏最多并排数（再多每格太窄）
@@ -147,7 +149,63 @@ function buildTabs() {
     });
     tabsBox.appendChild(b);
   });
+  moreItems(); // 两行装不下的站点收进「⋯」菜单
 }
+
+// ---------- 顶栏溢出「⋯」菜单 ----------
+// #tabs 最多两行；装不下的站点收进菜单（图标 + 名称 + 仅小窗标记）。
+// 溢出量随侧边栏宽度变化，用 resizeObserver + 每次 buildTabs 后重算。
+function moreItems() {
+  const tabs = [...tabsBox.querySelectorAll(".site-tab")];
+  if (!tabs.length) {
+    moreBtn.hidden = true;
+    closeMoreMenu();
+    return;
+  }
+  // 顶栏可用高度能容纳的行数（92px 上限 ≈ 2 行 30px 图标 + 间隙）
+  const rows = Math.max(1, Math.floor((tabsBox.clientHeight || 92) / 33));
+  const perRow = Math.max(1, Math.floor(tabsBox.clientWidth / 33)); // 30px 图标 + 2px 间隙
+  const capacity = rows * perRow;
+  const overflow = tabs.slice(capacity);
+  moreBtn.hidden = overflow.length === 0;
+  overflow.forEach((el) => (el.style.visibility = "hidden"));
+  tabs.slice(0, capacity).forEach((el) => (el.style.visibility = ""));
+  // 菜单内容：仅溢出的站点
+  moreMenu.textContent = "";
+  overflow.forEach((el) => {
+    const site = siteById(el.dataset.id);
+    if (!site) return;
+    const item = document.createElement("button");
+    item.className = "more-item";
+    item.appendChild(makeIcon(site));
+    const nm = document.createElement("span");
+    nm.className = "more-name";
+    nm.textContent = site.name;
+    item.appendChild(nm);
+    if (site.noEmbed) {
+      const tg = document.createElement("span");
+      tg.className = "more-tag";
+      tg.textContent = "仅小窗";
+      item.appendChild(tg);
+    }
+    item.addEventListener("click", () => {
+      closeMoreMenu();
+      showSite(site.id);
+    });
+    moreMenu.appendChild(item);
+  });
+}
+function closeMoreMenu() {
+  moreMenu.classList.remove("show");
+}
+moreBtn.addEventListener("click", (e) => {
+  e.stopPropagation();
+  moreMenu.classList.toggle("show");
+});
+document.addEventListener("click", (e) => {
+  if (moreMenu.classList.contains("show") && !moreMenu.contains(e.target)) closeMoreMenu();
+});
+window.addEventListener("resize", moreItems);
 
 // 拖拽经过时实时腾位：把被拖图标插到指针最近的间隙（同行优先）
 function insertionSlot(x, y) {
@@ -304,7 +362,6 @@ function render() {
       close.addEventListener("click", () => toggleSelect(id));
       head.append(name, alive, warnIcon, popBtn, close);
       pane.appendChild(head);
-      startBeatWatch(id);
 
       // spinner：iframe load 事件后淡出
       const loading = document.createElement("div");
@@ -375,7 +432,15 @@ function toggleSelect(id) {
       showToast(`最多同时对比 ${MAX_COMPARE} 个`);
       return;
     }
-    if (!siteById(id)) return;
+    const site = siteById(id);
+    if (!site) return;
+    // noEmbed 站点进不了对比集合（面板根本无法内嵌），直接弹小窗，
+    // 避免出现「顶栏选中态/对比胶囊里有它，面板却不显示」的错位
+    if (site.noEmbed) {
+      showToast(`「${site.name}」仅支持独立小窗，已为你弹出`);
+      popout(id);
+      return;
+    }
     selected.add(id);
     currentId = id;
     chrome.storage.local.set({ dsActiveSite: id });
@@ -461,6 +526,28 @@ popoutBtn.addEventListener("click", () => {
 
 // ---------- 管理面板 ----------
 let editingId = null; // null=新增
+let dragRow = null; // 拖拽排序中的列表行
+
+// 列表拖拽经过时实时腾位：插到指针最近的行间隙
+siteListBox.addEventListener("dragover", (e) => {
+  if (!dragRow) return;
+  e.preventDefault();
+  e.dataTransfer.dropEffect = "move";
+  const rows = [...siteListBox.querySelectorAll(".site-row:not(.dragging)")];
+  let best = null;
+  let bestDist = Infinity;
+  for (const el of rows) {
+    const r = el.getBoundingClientRect();
+    const after = e.clientY > r.top + r.height / 2;
+    const d = Math.abs(e.clientY - (r.top + r.height / 2));
+    if (d < bestDist) {
+      bestDist = d;
+      best = after ? el.nextSibling : el;
+    }
+  }
+  if (!best) siteListBox.appendChild(dragRow);
+  else if (best !== dragRow) siteListBox.insertBefore(dragRow, best);
+});
 
 function openManage() {
   manageBox.classList.add("show");
@@ -486,6 +573,9 @@ function renderManageList() {
     const row = document.createElement("div");
     row.className = "site-row";
     row.style.animationDelay = Math.min(i * 30, 400) + "ms"; // 级联入场
+    // ---- 管理列表拖拽排序（顶栏图标顺序跟随此处） ----
+    row.draggable = true;
+    row.dataset.id = site.id;
 
     row.appendChild(makeIcon(site, "row-icon"));
 
@@ -531,6 +621,27 @@ function renderManageList() {
       setTimeout(() => deleteSite(site.id, idx), 180);
     });
     row.appendChild(del);
+
+    // 拖拽手柄态：按住行拖动可调顺序；松手按 DOM 顺序重排 SITES
+    row.addEventListener("dragstart", (e) => {
+      dragRow = row;
+      row.classList.add("dragging");
+      e.dataTransfer.effectAllowed = "move";
+      try {
+        e.dataTransfer.setData("text/plain", site.id);
+      } catch (_e) {}
+    });
+    row.addEventListener("dragend", () => {
+      row.classList.remove("dragging");
+      dragRow = null;
+      const ids = [...siteListBox.querySelectorAll(".site-row")].map((el) => el.dataset.id);
+      const reordered = ids.map(siteById).filter(Boolean);
+      if (reordered.length !== SITES.length || reordered.some((s, j) => s.id !== SITES[j].id)) {
+        SITES = reordered;
+        saveSites();
+        refreshAll(); // 顶栏图标 + 管理列表一起按新顺序重建
+      }
+    });
 
     siteListBox.appendChild(row);
   });
@@ -639,14 +750,15 @@ formSave.addEventListener("click", () => {
 });
 
 // ---------- 删除站点：toast + 撤销（替代原生 confirm） ----------
-// 撤销 = 按原下标把站点塞回去，恢复会话帧与选中态
+// 撤销 = 按原下标把站点塞回去，恢复会话帧与选中态。
+// 快照用栈：连续删除多个时不丢最早的撤销机会（后删先撤）
 let undoTimer = null;
-let undoSnapshot = null;
+const undoStack = []; // { site, idx, framesEntry }，栈顶 = 最近一次删除
 
 function deleteSite(id, idx) {
   const site = siteById(id);
   if (!site) return;
-  undoSnapshot = { site, idx, framesEntry: frames.get(id) || null };
+  undoStack.push({ site, idx, framesEntry: frames.get(id) || null });
   SITES = SITES.filter((s) => s.id !== id);
   frames.get(id)?.el.remove();
   frames.delete(id);
@@ -676,14 +788,13 @@ function deleteSite(id, idx) {
   clearTimeout(undoTimer);
   undoTimer = setTimeout(() => {
     toastBox.classList.remove("show");
-    undoSnapshot = null; // 撤销窗口关闭，快照作废
+    undoStack.length = 0; // 撤销窗口关闭，快照作废
   }, 5000);
 }
 
 function restoreSite() {
-  const snap = undoSnapshot;
+  const snap = undoStack.pop();
   if (!snap) return;
-  undoSnapshot = null;
   SITES.splice(Math.min(snap.idx, SITES.length), 0, snap.site);
   if (snap.framesEntry) frames.set(snap.site.id, snap.framesEntry); // 会话帧不销毁，原地恢复
   if (!currentId || !siteById(currentId)) currentId = snap.site.id;
@@ -748,42 +859,47 @@ function refreshAll() {
 }
 
 // ---------- 面板存活点 ----------
-// ai-bridge 每 3s 按站点 host 写 dsBridgeBeat.<host>；侧边栏轮询该键，
-// 在多选面板头上点亮绿点。灰点 = 桥未运行（脚本未注入/停在登录页）。
-const beatTimers = new Map(); // host -> { timer, last }
-function startBeatWatch(id) {
-  const site = siteById(id);
-  if (!site) return;
-  let host;
-  try {
-    host = new URL(site.url).hostname;
-  } catch (e) {
-    return;
-  }
-  if (beatTimers.has(host)) return; // 同 host 只挂一个轮询
-  const key = "dsBridgeBeat." + host;
-  const state = { timer: null, last: 0 };
-  beatTimers.set(host, state);
-  state.timer = setInterval(async () => {
-    const d = await chrome.storage.local.get(key);
-    const at = d && d[key];
-    state.last = at || 0;
-    document.querySelectorAll(`.pane-head .alive[data-id]`).forEach((el) => {
-      const s = siteById(el.dataset.id);
-      if (!s) return;
-      let h;
-      try {
-        h = new URL(s.url).hostname;
-      } catch (_e) {
-        return;
+// ai-bridge 每 3s 按站点 host 写 dsBridgeBeat.<host>；这里用【单个】
+// 定时器 get(null) 一次读全量，刷新所有 .alive 点（多面板共用），
+// 并顺手清掉超过 60s 无心跳的死键（站点删了/桥停了留下的残留）。
+// 心跳在 8s 内视为存活（桥写间隔 3s，留 2 轮余量）。
+const BEAT_STALE_MS = 8000;
+const BEAT_KEY_GC_MS = 60000;
+let beatTimer = null;
+function startBeatWatch() {
+  if (beatTimer) return;
+  const refresh = () => {
+    chrome.storage.local.get(null, (all) => {
+      const now = Date.now();
+      const stale = [];
+      const beats = new Map();
+      for (const k in all) {
+        if (!k.startsWith("dsBridgeBeat.")) continue;
+        const at = all[k];
+        if (typeof at === "number") {
+          if (now - at > BEAT_KEY_GC_MS) stale.push(k);
+          else beats.set(k.slice("dsBridgeBeat.".length), at);
+        } else stale.push(k);
       }
-      if (h !== host) return;
-      const st = beatTimers.get(h);
-      // 心跳在 8s 内视为存活（桥写间隔 3s，留 2 轮余量）
-      el.classList.toggle("ok", !!(st && st.last && Date.now() - st.last < 8000));
+      if (stale.length) chrome.storage.local.remove(stale); // #10 死键清理
+      document.querySelectorAll(".pane-head .alive[data-id]").forEach((el) => {
+        const s = siteById(el.dataset.id);
+        if (!s) return;
+        let host;
+        try {
+          host = new URL(s.url).hostname;
+        } catch (_e) {
+          return;
+        }
+        const at = beats.get(host) || 0;
+        el.classList.toggle("ok", now - at < BEAT_STALE_MS);
+      });
     });
-  }, 4000);
+  };
+  beatTimer = setInterval(refresh, 4000);
+  refresh();
 }
+startBeatWatch();
 
 
 // Esc：优先关表单，再退出对比模式，最后关管理面板
@@ -821,8 +937,8 @@ window.addEventListener("blur", () => tabsBox.classList.remove("ctrl-mode"));
   const savedIds = (d && d.dsCompareIds) || [];
 
   currentId = siteById(saved) ? saved : SITES.length ? SITES[0].id : null;
-  // 恢复多选：只保留仍存在的站点；合法（≥2）才进对比模式
-  selected = new Set(savedIds.filter((id) => siteById(id)));
+  // 恢复多选：只保留仍存在且可内嵌的站点（noEmbed 站点进不了对比集合）；合法（≥2）才进对比模式
+  selected = new Set(savedIds.filter((id) => { const s = siteById(id); return s && !s.noEmbed; }));
   if (selected.size === 1) selected.clear();
   if (selected.size > MAX_COMPARE) selected = new Set([...selected].slice(0, MAX_COMPARE));
 

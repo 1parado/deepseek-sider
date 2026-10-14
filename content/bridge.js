@@ -10,6 +10,46 @@
   if (window.__dsBridgeInstalled) return;
   window.__dsBridgeInstalled = true;
 
+  // ---------- 侧边栏 iframe 中的导航拦截 ----------
+  // 本脚本也运行在侧边栏的 iframe 里（all_frames）。此时点击 <a>
+  // 或 target=_blank 会让侧边栏面板整页跳走，会话就丢了。
+  // 捕获阶段拦截：跨站链接 preventDefault 后交由 background 开真实
+  // 标签页；同站导航（如切换会话）放行不动。
+  if (window.self !== window.top) {
+    const inFrame = () => {
+      try {
+        return window.self !== window.top;
+      } catch (e) {
+        return true;
+      }
+    };
+    document.addEventListener(
+      "click",
+      (e) => {
+        if (!inFrame()) return;
+        const a = e.target && e.target.closest ? e.target.closest("a[href]") : null;
+        if (!a) return;
+        let url;
+        try {
+          url = new URL(a.href, location.href);
+        } catch (_e) {
+          return;
+        }
+        // 只拦 http(s)：javascript:/blob:/anchor 跳过
+        if (!/^https?:$/i.test(url.protocol)) return;
+        // 同站（含子域替换）放行：SPA 内部导航不该被劫到新标签页
+        if (url.hostname === location.hostname) return;
+        // 中键 / Ctrl / Cmd / Shift 修饰点击本来就是开新标签，不拦
+        if (e.button === 1 || e.ctrlKey || e.metaKey || e.shiftKey) return;
+        // target=_blank 或跨站链接 → 开真实标签页
+        e.preventDefault();
+        e.stopPropagation();
+        chrome.runtime.sendMessage({ type: "DS_OPEN_IN_TAB", url: url.href }).catch(() => {});
+      },
+      true
+    );
+  }
+
   chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     if (msg && msg.type === "DS_PING") {
       sendResponse({ ok: true });

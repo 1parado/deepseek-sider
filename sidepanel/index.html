@@ -47,6 +47,75 @@
       background: #ddd;
       border-radius: 2px;
     }
+    /* 顶栏溢出：超两行的站点收进「⋯」菜单 */
+    #more-btn {
+      flex: none;
+      font-weight: 700;
+      letter-spacing: 1px;
+    }
+    #more-menu {
+      position: absolute;
+      top: 46px;
+      right: 8px;
+      z-index: 30;
+      min-width: 176px;
+      max-height: 300px;
+      overflow-y: auto;
+      background: #fff;
+      border: 1px solid #e4e6ea;
+      border-radius: 12px;
+      box-shadow: 0 10px 32px rgba(0, 0, 0, 0.14);
+      padding: 6px;
+      display: none;
+    }
+    #more-menu.show {
+      display: block;
+      animation: more-in 0.16s cubic-bezier(0.2, 0.8, 0.3, 1);
+    }
+    @keyframes more-in {
+      from {
+        opacity: 0;
+        transform: translateY(-6px) scale(0.97);
+      }
+    }
+    .more-item {
+      display: flex;
+      align-items: center;
+      gap: 9px;
+      width: 100%;
+      border: none;
+      background: none;
+      padding: 7px 9px;
+      border-radius: 8px;
+      cursor: pointer;
+      font-size: 13px;
+      color: #1c1f23;
+      text-align: left;
+    }
+    .more-item:hover {
+      background: #f2f3f5;
+    }
+    .more-item img,
+    .more-item span.letter {
+      width: 18px;
+      height: 18px;
+      border-radius: 4px;
+      object-fit: contain;
+      flex: none;
+    }
+    .more-item .more-name {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .more-item .more-tag {
+      flex: none;
+      font-size: 10px;
+      color: #b3261e;
+      background: #fdecea;
+      border-radius: 4px;
+      padding: 1px 5px;
+    }
     .site-tab {
       width: 30px;
       height: 30px;
@@ -568,6 +637,50 @@
         transform: translateY(14px) scale(0.99);
       }
     }
+    /* 快捷键速查：贴在站点列表下方，flex:none 不随列表滚动 */
+    .shortcut-sheet {
+      flex: none;
+      padding: 10px 14px 12px;
+      border-top: 1px solid #ececec;
+      background: #fafbfc;
+    }
+    .shortcut-sheet .sheet-title {
+      font-size: 12px;
+      color: #9aa0a6;
+      margin-bottom: 8px;
+      letter-spacing: 0.5px;
+    }
+    .shortcut-sheet .sheet-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 6px 14px;
+    }
+    .shortcut-sheet .sheet-item {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      font-size: 12px;
+      color: #3c4043;
+      min-width: 0;
+    }
+    .shortcut-sheet .sheet-item span:first-child {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .shortcut-sheet kbd {
+      flex: none;
+      font-family: inherit;
+      font-size: 11px;
+      color: #1c1f23;
+      background: #eef1f5;
+      border: 1px solid #dfe3e8;
+      border-bottom-width: 2px;
+      border-radius: 5px;
+      padding: 1px 6px;
+      white-space: nowrap;
+    }
     .manage-head {
       flex: none;
       display: flex;
@@ -608,6 +721,11 @@
       border-radius: 10px;
       transition: background 0.12s;
       animation: row-in 0.25s both;
+      cursor: grab; /* 拖拽排序：按住行拖动调顺序 */
+    }
+    .site-row.dragging {
+      opacity: 0.35;
+      cursor: grabbing;
     }
     /* 行级联入场：JS 设定 --i，逐行错开 30ms */
     @keyframes row-in {
@@ -827,6 +945,8 @@
   <div id="app">
     <div id="bar">
       <div id="tabs"></div>
+      <button class="bar-btn" id="more-btn" hidden title="更多站点">⋯</button>
+      <div id="more-menu" hidden></div>
       <div id="bar-spacer"></div>
       <div id="bar-actions">
         <span id="hint"></span>
@@ -854,6 +974,17 @@
           <button class="btn-text" id="close-manage">完成</button>
         </div>
         <div id="site-list"></div>
+        <div class="shortcut-sheet">
+          <div class="sheet-title">快捷键</div>
+          <div class="sheet-grid">
+            <div class="sheet-item"><span>切换站点</span><kbd>单击图标</kbd></div>
+            <div class="sheet-item"><span>加入 / 移出对比</span><kbd>Ctrl + 单击</kbd></div>
+            <div class="sheet-item"><span>快速多选前 4 个</span><kbd>Ctrl + 1~4</kbd></div>
+            <div class="sheet-item"><span>退出对比模式</span><kbd>Esc</kbd></div>
+            <div class="sheet-item"><span>分隔条复位均分</span><kbd>双击分隔条</kbd></div>
+            <div class="sheet-item"><span>弹出独立小窗</span><kbd>⧉ 按钮</kbd></div>
+          </div>
+        </div>
         <div id="site-form">
           <input id="form-name" placeholder="名称，如：智谱清言" maxlength="24" />
           <input id="form-url" placeholder="网址，如：chatglm.cn（可省略 https://）" />

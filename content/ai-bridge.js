@@ -83,6 +83,12 @@
         document.querySelector('[contenteditable="true"]'),
       send: () => clickSendButton(/send|发送/i),
     },
+    zhipu: {
+      input: () =>
+        document.querySelector("textarea") ||
+        document.querySelector('[contenteditable="true"]'),
+      send: () => clickSendButton(/发送|send/i),
+    },
     qwen: {
       input: () =>
         document.querySelector("textarea") ||
@@ -156,6 +162,9 @@
     grok: "grok",
     doubao: "doubao",
     kimi: "kimi",
+    chatglm: "zhipu",
+    zhipu: "zhipu",
+    bigmodel: "zhipu",
     qianwen: "qwen",
     tongyi: "qwen",
     yuanbao: "yuanbao",
