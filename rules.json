@@ -10,7 +10,25 @@
       ]
     },
     "condition": {
-      "urlFilter": "||chat.deepseek.com/",
+      "requestDomains": [
+        "chat.deepseek.com",
+        "chatgpt.com",
+        "claude.ai",
+        "gemini.google.com",
+        "grok.com",
+        "www.doubao.com",
+        "www.kimi.com",
+        "www.qianwen.com",
+        "yuanbao.tencent.com",
+        "www.perplexity.ai",
+        "chat.mistral.ai",
+        "copilot.microsoft.com",
+        "poe.com",
+        "chat.groq.com",
+        "huggingface.co",
+        "pi.ai",
+        "you.com"
+      ],
       "resourceTypes": ["sub_frame"]
     }
   }
