@@ -402,12 +402,78 @@
     }
   });
 
+  // ---------- Grok 实时连接（WebSocket）补丁 ----------
+  // Grok 页面脚本会建 WebSocket 做实时流；在 iframe（第三方上下文）里首次握手
+  // 可能因 Cookie 分区/风控暂时失败，页面自己不重试，直接挂上
+  // 「你的网络或安全软件阻止了 Grok 的实时连接」横幅，且之后不再恢复。
+  // 做法（须在页面主世界执行才能拦截页面的 new WebSocket）：
+  //   1. 包一层 WebSocket：失败自动退避重连，连上后页面逻辑自行恢复
+  //   2. 连不上时隐藏报错横幅，避免误导（并不影响文字聊天）
+  function patchGrokSocket() {
+    // content script 默认跑在隔离世界，看不到页面的 window.WebSocket 调用点；
+    // 用 <script> 注入主世界（rules.json 已剥掉 grok 的 CSP，允许内联脚本）
+    const code = `(${function main() {
+      const WS = window.WebSocket;
+      const BANNER_TEXT = /实时连接|realtime|WebSocket/i;
+      let retry = 0;
+      const RETRIES = [500, 2000, 5000, 10000, 15000]; // 退避序列，ms
+
+      window.WebSocket = function PatchedWS(url, protocols) {
+        const isGrok = String(url).toLowerCase().startsWith("ws");
+        let ws;
+        function open() {
+          ws = protocols === undefined ? new WS(url) : new WS(url, protocols);
+          const origClose = ws.close.bind(ws);
+          ws.addEventListener("close", (e) => {
+            // 非用户主动关闭且没连上过 → 退避重连
+            if (isGrok && retry < RETRIES.length && e.code !== 1000) {
+              const delay = RETRIES[retry++];
+              setTimeout(open, delay);
+            }
+          });
+          ws.addEventListener("open", () => { retry = 0; });
+          return ws;
+        }
+        ws = open();
+        // 代理属性（页面会挂 onmessage/onclose 等），透传到当前底层连接
+        return new Proxy(ws, {
+          get(t, p) {
+            if (p === "reopen") return open;
+            const v = Reflect.get(t, p);
+            return typeof v === "function" ? v.bind(t) : v;
+          },
+          set(t, p, v) { Reflect.set(t, p, v); return true; },
+        });
+      };
+      window.WebSocket.prototype = WS.prototype;
+      // 静态属性（CONNECTING/OPEN/CLOSING/CLOSED 常量被页面引用）
+      Object.entries(WS).forEach(([k, v]) => { window.WebSocket[k] = v; });
+
+      // 重试都失败后，页面挂出的报错横幅直接隐藏（文字聊天不受影响）
+      setInterval(() => {
+        document.querySelectorAll("div,span,p").forEach((el) => {
+          if (el.children.length === 0 && el.childElementCount === 0 &&
+              el.textContent.length < 200 && BANNER_TEXT.test(el.textContent) &&
+              /网络或安全软件|network or security/i.test(el.textContent)) {
+            const bar = el.closest('[role="alert"],div') || el;
+            bar.style.display = "none";
+          }
+        });
+      }, 3000);
+    }})()`;
+    const s = document.createElement("script");
+    s.textContent = code;
+    s.onload = () => s.remove();
+    (document.head || document.documentElement).appendChild(s);
+  }
+
   // ---------- 监听页面变化 ----------
 
   const observer = new MutationObserver(() => scanCodeBlocks());
   function start() {
     observer.observe(document.body, { childList: true, subtree: true });
     setTimeout(scanCodeBlocks, 1000);
+    if (location.hostname.endsWith("grok.com")) patchGrokSocket();
     // 侧边栏/小窗刚被打开时，投递可能先于本脚本就绪：补查 60 秒内的待填内容
     chrome.storage.local.get("aiPendingPrompt", (d) => {
       const item = d && d.aiPendingPrompt;

@@ -100,11 +100,29 @@ function makeIcon(site, cls) {
 }
 
 // ---------- 站点列表持久化 ----------
+// 版本升级补齐：用户自定义 aiSites 覆盖出厂清单后，新版本新增的内置站点
+// （如后来加的「智谱清言」）应自动补到列表尾部；但用户主动删掉的内置站点
+// 记在 dsRemovedBuiltins，不再自动补回。
+function mergeBuiltins(list, resolve) {
+  chrome.storage.local.get("dsRemovedBuiltins", (d) => {
+    const removed = new Set((d && d.dsRemovedBuiltins) || []);
+    let changed = false;
+    BUILTIN_AI_SITES.forEach((b) => {
+      if (!removed.has(b.id) && !list.some((s) => s.id === b.id)) {
+        list.push({ ...b });
+        changed = true;
+      }
+    });
+    if (changed) chrome.storage.local.set({ aiSites: list });
+    resolve(list);
+  });
+}
 function loadSites() {
   return new Promise((resolve) => {
     chrome.storage.local.get("aiSites", (d) => {
       const list = d && d.aiSites;
-      resolve(Array.isArray(list) && list.length && list.every(isValidSite) ? list : BUILTIN_AI_SITES.slice());
+      if (Array.isArray(list) && list.length && list.every(isValidSite)) mergeBuiltins(list, resolve);
+      else resolve(BUILTIN_AI_SITES.slice());
     });
   });
 }
@@ -407,6 +425,7 @@ function render() {
   });
   markTabs();
 }
+
 
 function showSite(id) {
   if (currentId !== id) {
@@ -760,6 +779,14 @@ function deleteSite(id, idx) {
   if (!site) return;
   undoStack.push({ site, idx, framesEntry: frames.get(id) || null });
   SITES = SITES.filter((s) => s.id !== id);
+  // 内置站点被用户删除：记账，避免下次启动时被版本升级补齐逻辑加回来
+  if (BUILTIN_AI_SITES.some((b) => b.id === id)) {
+    chrome.storage.local.get("dsRemovedBuiltins", (d) => {
+      const removed = new Set((d && d.dsRemovedBuiltins) || []);
+      removed.add(id);
+      chrome.storage.local.set({ dsRemovedBuiltins: [...removed] });
+    });
+  }
   frames.get(id)?.el.remove();
   frames.delete(id);
   selected.delete(id);
@@ -797,6 +824,13 @@ function restoreSite() {
   if (!snap) return;
   SITES.splice(Math.min(snap.idx, SITES.length), 0, snap.site);
   if (snap.framesEntry) frames.set(snap.site.id, snap.framesEntry); // 会话帧不销毁，原地恢复
+  // 撤销删除：同时从「已删内置」记账中移除（若是内置站点）
+  chrome.storage.local.get("dsRemovedBuiltins", (d) => {
+    const removed = (d && d.dsRemovedBuiltins) || [];
+    if (removed.includes(snap.site.id)) {
+      chrome.storage.local.set({ dsRemovedBuiltins: removed.filter((x) => x !== snap.site.id) });
+    }
+  });
   if (!currentId || !siteById(currentId)) currentId = snap.site.id;
   saveSites();
   saveCompareState();
@@ -818,6 +852,7 @@ resetBtn.addEventListener("click", async () => {
   // 可撤销：快照整个当前列表，toast 5 秒内可一键还原
   const snapshot = SITES.slice();
   await new Promise((r) => chrome.storage.local.remove("aiSites", r));
+  chrome.storage.local.remove("dsRemovedBuiltins");
   SITES = BUILTIN_AI_SITES.slice();
   frames.forEach((e) => e.el.remove());
   frames.clear();
