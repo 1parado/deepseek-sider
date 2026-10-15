@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>parse fixture</title></head>
+<body><div id="host"></div>
+<script src="./kb-parse-extract.js"></script>
+<script>
+(function(){
+  const host = document.getElementById('host');
+  host.innerHTML = [
+    '<div class="qwen-msg">',
+    '  <div data-message-author-role="user"><p>我想要了解一下大模型的机制</p></div>',
+    '  <div class="search-panel">',
+    '    <a href="https://zhihu.com/a"><img src="data:image/gif;base64,R0" width="24" height="24"><span>深入 Transformer:大语言模型底层架构全解析</span></a>',
+    '    <a href="https://zhihu.com/b"><img src="data:image/gif;base64,R0" width="24" height="24"><span>大模型进阶之路:预训练与微调技术深度解析</span></a>',
+    '    <a href="https://z.q7.com/c"><span>查看全部</span></a>',
+    '  </div>',
+    '  <div class="markdown-body" data-message-author-role="assistant">',
+    '    <p>大模型的机制可以拆成四块来理解,这是正文。</p>',
+    '    <p>注意力公式 <span class="katex"><span class="katex-mathml"><math><semantics><annotation encoding="application/x-tex">\mathrm{Attention}(Q,K,V)=\mathrm{softmax}\\left(\\frac{QK^T}{\\sqrt{d_k}}\\right)V</annotation></semantics></math></span><span class="katex-html" aria-hidden="true">Attention(Q,K,V)=softmaxQKTdkV</span></span> 输出加权。</p>',
+    '    <a href="https://example.com/inline-ref">正文内引用:一文讲透AI大模型架构与原理流程详解</a>',
+    '  </div>',
+    '</div>',
+    '<div class="ds-msg">',
+    '  <div class="_think-container"><p>我们需要回答用户中文。需要解释大模型机制。这是推理内容。</p></div>',
+    '  <div class="ds-markdown">',
+    '    <p>大模型（LLM）的机制可以拆成:架构、训练、推理、对齐四块。这是正文。</p>',
+    '  </div>',
+    '</div>'
+  ].join('\n');
+  const qwen = host.querySelector('.qwen-msg .markdown-body');
+  // 模拟千问 host → 适配器路径生效（user/think/panels 选择器走声明值）
+  const origHost = Object.getOwnPropertyDescriptor(window, 'location');
+  try { Object.defineProperty(window, 'location', { value: { hostname: 'chat.qwen.ai' }, configurable: true }); } catch(e) {}
+  const qParsed = kbParseBlocks(qwen);
+  const qAround = collectRefsAround(qwen);
+  try { Object.defineProperty(window, 'location', { value: { hostname: 'chat.deepseek.com' }, configurable: true }); } catch(e) {}
+  const dsMd = host.querySelector('.ds-msg .ds-markdown');
+  const dsParsed = kbParseBlocks(dsMd);
+  try { if (origHost) Object.defineProperty(window, 'location', origHost); } catch(e) {}
+  window.__result = {
+    qwen: {
+      plainText: qParsed.plainText,
+      blocks: qParsed.blocks.map(function(b){ return b.t === 'p' ? b.text : b.t + ':' + (b.url || ''); }),
+      refs: qParsed.refs.concat(qAround),
+    },
+    deepseek: {
+      plainText: dsParsed.plainText,
+      blocks: dsParsed.blocks.map(function(b){ return b.t === 'p' ? b.text : b.t + ':' + (b.url || ''); }),
+    },
+  };
+})();
+</script></body></html>

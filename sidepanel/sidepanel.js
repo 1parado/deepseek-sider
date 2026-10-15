@@ -146,6 +146,8 @@ function buildTabs() {
     b.style.animation = `row-in 0.25s ${Math.min(i * 30, 360)}ms both`; // 级联入场
     b.addEventListener("click", (e) => {
       if (Date.now() < suppressClickUntil) return; // 刚拖完，不是点击
+      // 切站点前退出知识库覆盖层（否则盖住 AI 页面看不到）
+      document.dispatchEvent(new CustomEvent("kb-close-request"));
       if (e.ctrlKey || e.metaKey) toggleSelect(site.id);
       else showSite(site.id);
     });
@@ -224,6 +226,60 @@ document.addEventListener("click", (e) => {
   if (moreMenu.classList.contains("show") && !moreMenu.contains(e.target)) closeMoreMenu();
 });
 window.addEventListener("resize", moreItems);
+
+// ---------- 顶栏高度拖拽 ----------
+// 顶栏底缘有一条 6px 的拖拽热区，向下拖显示更多行（1~3 行），松手记忆。
+// moreItems() 的容量按 tabsBox.clientHeight 计算，行数自动随之变化。
+const TABS_H_KEY = "dsTabsHeight";
+const ROW_H = 33;          // 单行图标高度（30px 图标 + 间隙），与 moreItems 一致
+const TABS_MIN = 34;       // 1 行
+const TABS_MAX = 100;      // 3 行
+let tabsMaxH = 92;         // CSS 里的默认 max-height（两行）
+function applyTabsMax(h) {
+  tabsMaxH = Math.max(TABS_MIN, Math.min(TABS_MAX, Math.round(h)));
+  tabsBox.style.maxHeight = tabsMaxH + "px";
+  moreItems();
+}
+(async function restoreTabsHeight() {
+  const d = await new Promise((r) => chrome.storage.local.get(TABS_H_KEY, (v) => r(v[TABS_H_KEY])));
+  if (typeof d === "number") applyTabsMax(d);
+})();
+(function injectResizeGrip() {
+  const bar = document.getElementById("bar");
+  if (!bar) return;
+  const grip = document.createElement("div");
+  grip.id = "bar-resize-grip";
+  grip.title = "拖拽调整顶栏高度";
+  bar.appendChild(grip);
+  let startY = 0, startH = 0, resizing = false;
+  grip.addEventListener("pointerdown", (e) => {
+    e.preventDefault();
+    try { grip.setPointerCapture(e.pointerId); } catch (_err) {}
+    resizing = true;
+    startY = e.clientY;
+    startH = tabsBox.getBoundingClientRect().height;
+    document.body.classList.add("tabs-resizing");
+  });
+  grip.addEventListener("pointermove", (e) => {
+    if (!resizing) return;
+    applyTabsMax(startH + (e.clientY - startY));
+  });
+  grip.addEventListener("pointerup", (e) => {
+    if (!resizing) return;
+    resizing = false;
+    try { grip.releasePointerCapture(e.pointerId); } catch (_err) {}
+    document.body.classList.remove("tabs-resizing");
+    chrome.storage.local.set({ [TABS_H_KEY]: tabsMaxH });
+  });
+  grip.addEventListener("pointercancel", () => {
+    resizing = false;
+    document.body.classList.remove("tabs-resizing");
+  });
+  grip.addEventListener("dblclick", () => {
+    applyTabsMax(92); // 双击复位默认两行
+    chrome.storage.local.set({ [TABS_H_KEY]: 92 });
+  });
+})();
 
 // 拖拽经过时实时腾位：把被拖图标插到指针最近的间隙（同行优先）
 function insertionSlot(x, y) {
@@ -940,6 +996,9 @@ startBeatWatch();
 // Esc：优先关表单，再退出对比模式，最后关管理面板
 window.addEventListener("keydown", (e) => {
   if (e.key === "Escape") {
+    // 知识库视图打开时由 kb-ui.js 自己处理 Esc，避免同时退出对比模式
+    const kbBox = document.getElementById("kb");
+    if (kbBox && kbBox.classList.contains("show")) return;
     if (formBox.classList.contains("show")) return hideForm();
     if (manageBox.classList.contains("show")) return closeManagePanel();
     if (selected.size) return showSite(currentId);

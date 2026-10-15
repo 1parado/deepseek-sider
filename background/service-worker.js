@@ -9,6 +9,8 @@
 // ============================================================
 
 importScripts("../shared/ai-sites.js");
+importScripts("../shared/kb-db.js");
+importScripts("../shared/kb-export.js");
 
 // Agent 目标标签页（协议指令 read/click 等作用对象）
 let agentTabId = null;
@@ -40,21 +42,89 @@ async function getSiteById(id) {
   return sites.find((s) => s.id === id) || null;
 }
 
-chrome.runtime.onInstalled.addListener(() => {
-  // 点击工具栏图标时打开侧边栏
-  chrome.sidePanel
-    .setPanelBehavior({ openPanelOnActionClick: true })
-    .catch(() => {});
-
-  // 右键菜单：选中文本 → AI 一下
+// 右键菜单：选中文本 → AI 一下 / 存知识库；图片 → 存知识库
+// onInstalled + SW 每次唤醒都注册一遍（removeAll + create 幂等），
+// 避免某些时机（仅重载文件 / SW 重启）菜单丢失
+function registerMenus() {
   chrome.contextMenus.removeAll(() => {
     chrome.contextMenus.create({
       id: "ds-ask-selection",
       title: "AI 一下",
       contexts: ["selection"],
     });
+    chrome.contextMenus.create({
+      id: "ds-kb-save-selection",
+      title: "加入知识库",
+      contexts: ["selection"],
+    });
+    chrome.contextMenus.create({
+      id: "ds-kb-save-image",
+      title: "保存图片到知识库",
+      contexts: ["image"],
+    });
   });
+}
+
+chrome.runtime.onInstalled.addListener(() => {
+  // 点击工具栏图标时打开侧边栏
+  chrome.sidePanel
+    .setPanelBehavior({ openPanelOnActionClick: true })
+    .catch(() => {});
+
+  registerMenus();
+  syncAutoExportAlarm();
 });
+
+// ---- 知识库每日自动导出 ----
+// 侧边栏开启「自动导出」后：每天一次把知识库导出为 Markdown 写入用户选定
+// 目录（File System Access 持久化句柄，存 kb-v1/kv），成功后清空 IndexedDB。
+// SW 可能在任意时刻被唤醒，因此导出逻辑整体放在 SW 侧；侧边栏只负责
+// 选目录 / 开关设置，开关变化经 DS_KB_EXPORT_SETTINGS 通知这里同步闹钟。
+const KB_EXPORT_ALARM = "kbAutoExportDaily";
+
+async function syncAutoExportAlarm() {
+  const auto = await kbExportGetAuto();
+  const existing = await chrome.alarms.get(KB_EXPORT_ALARM);
+  if (auto) {
+    if (!existing) {
+      // 触发点设为每天上午 9 点半左右；错过的（浏览器当时没开）唤醒后立即补跑
+      const next = new Date();
+      next.setHours(9, 30, 0, 0);
+      if (next.getTime() <= Date.now()) next.setDate(next.getDate() + 1);
+      chrome.alarms.create(KB_EXPORT_ALARM, { when: next.getTime(), periodInMinutes: 1440 });
+    }
+  } else if (existing) {
+    chrome.alarms.clear(KB_EXPORT_ALARM);
+  }
+}
+
+async function runAutoExport() {
+  const auto = await kbExportGetAuto();
+  if (!auto) return null;
+  const dir = await kbExportGetDir();
+  if (!dir) return null;
+  try {
+    const res = await kbExportRun(dir, true);
+    if (res.skipped) return res;
+    console.info("[DS BG] 自动导出完成：", res.count, "条");
+    chrome.runtime.sendMessage({ type: "DS_KB_CHANGED" }).catch(() => {});
+    return res;
+  } catch (e) {
+    console.warn("[DS BG] 自动导出失败（保留数据，下个周期重试）：", e);
+    // 句柄失效（目录被删/权限收回）→ 关闭自动导出，等用户重新设置
+    if (String(e).includes("Permission") || String(e).includes("not allowed")) {
+      await kbExportSetAuto(false);
+      syncAutoExportAlarm();
+    }
+    return null;
+  }
+}
+
+chrome.alarms.onAlarm.addListener((alarm) => {
+  if (alarm.name === KB_EXPORT_ALARM) runAutoExport();
+});
+
+registerMenus();
 
 chrome.action.onClicked.addListener((tab) => {
   chrome.sidePanel.open({ windowId: tab.windowId }).catch(() => {});
@@ -64,7 +134,71 @@ chrome.action.onClicked.addListener((tab) => {
 // 参照 Chrome 官方模式（contextMenus 示例）：回调里【同步】调用
 // sidePanel.open() 保住用户手势。注意不要在 open 之前 await 任何异步
 // 操作——手势会在第一个 await 后丢失，open 将被 Chrome 拒绝。
+// ---- Alt+S 快捷键：转发给 AI 页面桥执行采集 ----
+chrome.commands.onCommand.addListener((command, tab) => {
+  if (command !== "kb-capture" || !tab) return;
+  chrome.tabs.sendMessage(tab.id, { type: "DS_KB_CAPTURE" }).catch(() => {});
+});
+
 chrome.contextMenus.onClicked.addListener((info, tab) => {
+  // 入口 C：右键图片 → 存知识库（取 srcUrl，走静默管线）
+  if (info.menuItemId === "ds-kb-save-image") {
+    if (info.srcUrl && tab) {
+      chrome.tabs.sendMessage(
+        tab.id,
+        { type: "DS_KB_CAPTURE_IMG", url: info.srcUrl, pageUrl: info.pageUrl },
+        { frameId: info.frameId }
+      ).catch(() => {});
+    }
+    return;
+  }
+  if (info.menuItemId === "ds-kb-save-selection") {
+    // 入口 D：右键选中文字 → 存知识库（走页面桥的选区管线）
+    // 页面桥不在线（非 AI 站点 / iframe 未注入）→ SW 直接按纯文本兜底入库
+    if (info.selectionText && tab) {
+      const text = info.selectionText.trim();
+      const pageUrl = info.pageUrl || "";
+      const model = (() => {
+        try {
+          return new URL(pageUrl).hostname;
+        } catch (_e) {
+          return "";
+        }
+      })();
+      const doFallbackSave = async () => {
+        try {
+          if (await kbIsDuplicate("网页选区", text)) return;
+          await kbEnsureInbox();
+          const paras = text.split(/\n\s*\n/).filter((s) => s.trim());
+          const excerpt = {
+            id: kbId("ex"),
+            title: (paras[0] || text).trim().slice(0, 40) || "网页选区",
+            blocks: paras.map((s) => ({ t: "p", text: s.trim() })),
+            plainText: text,
+            mediaIds: [],
+            projectId: KB_INBOX_ID,
+            tags: [],
+            sourceModel: "网页选区 · " + model,
+            sourceUrl: pageUrl,
+            createdAt: Date.now(),
+            updatedAt: Date.now(),
+          };
+          await kbSaveExcerpt(excerpt, []);
+          chrome.runtime.sendMessage({ type: "DS_KB_CHANGED", count: 1 }).catch(() => {});
+        } catch (e) {
+          console.warn("[DS BG] 选区兜底保存失败：", e);
+        }
+      };
+      chrome.tabs
+        .sendMessage(tab.id, { type: "DS_KB_CAPTURE_SEL" }, { frameId: info.frameId })
+        .then((res) => {
+          // 无接收者（content script 不在该 frame）→ 兜底
+          if (!res || chrome.runtime.lastError) doFallbackSave();
+        })
+        .catch(doFallbackSave);
+    }
+    return;
+  }
   if (info.menuItemId !== "ds-ask-selection" || !info.selectionText || !tab) return;
 
   const prompt =
@@ -151,6 +285,105 @@ async function openDockedWindow(siteId) {
 
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (!msg) return;
+
+  // ---- 知识库：来自 AI 页面桥的静默保存 ----
+  // content script 已解析 DOM / 抓好图片（dataURL），这里负责去重 + 入库
+  // （IndexedDB 开在扩展 origin，绕开站点配额与生命周期问题）
+  if (msg.type === "DS_KB_SAVE") {
+    (async () => {
+      try {
+        const p = msg.payload || {};
+        if (await kbIsDuplicate(p.sourceModel, p.plainText)) {
+          sendResponse({ ok: true, duplicate: true });
+          return;
+        }
+        await kbEnsureInbox();
+        const mediaList = (p.media || []).map((m, i) => ({
+          id: kbId("med"),
+          mime: m.mime,
+          dataUrl: m.dataUrl, // content script 已压缩；直接存 dataURL，避免 SW 侧再转 blob
+          thumb: m.thumb,
+        }));
+        const excerpt = {
+          id: kbId("ex"),
+          title: p.title || "无标题",
+          blocks: p.blocks || [],
+          plainText: p.plainText || "",
+          refs: Array.isArray(p.refs) ? p.refs.slice(0, 20) : [],
+          mediaIds: mediaList.map((m) => m.id),
+          projectId: KB_INBOX_ID,
+          tags: [],
+          sourceModel: p.sourceModel || "",
+          sourceUrl: p.sourceUrl || "",
+          createdAt: Date.now(),
+          updatedAt: Date.now(),
+        };
+        await kbSaveExcerpt(excerpt, mediaList);
+        // 通知侧边栏角标/列表刷新（开着的话）
+        chrome.runtime.sendMessage({ type: "DS_KB_CHANGED", count: 1 }).catch(() => {});
+        sendResponse({ ok: true, id: excerpt.id });
+      } catch (e) {
+        console.warn("[DS BG] 知识库保存失败：", e);
+        sendResponse({ ok: false, error: String(e && e.message ? e.message : e) });
+      }
+    })();
+    return true;
+  }
+
+  // ---- 知识库：SW 代抓图片（host_permissions <all_urls>，绕开页面 CORS） ----
+  if (msg.type === "DS_KB_FETCH_IMG") {
+    (async () => {
+      try {
+        if (typeof msg.url !== "string" || !/^https?:\/\//i.test(msg.url)) {
+          throw new Error("无效的图片地址");
+        }
+        const resp = await fetch(msg.url, { credentials: "include" });
+        if (!resp.ok) throw new Error("HTTP " + resp.status);
+        const blob = await resp.blob();
+        if (!/^image\//.test(blob.type)) throw new Error("非图片");
+        const buf = await blob.arrayBuffer();
+        let bin = "";
+        const bytes = new Uint8Array(buf);
+        const CHUNK = 32768;
+        for (let i = 0; i < bytes.length; i += CHUNK) {
+          bin += String.fromCharCode.apply(null, bytes.subarray(i, i + CHUNK));
+        }
+        sendResponse({ ok: true, dataUrl: "data:" + blob.type + ";base64," + btoa(bin) });
+      } catch (e) {
+        console.warn("[DS BG] 代抓图片失败：", msg.url && msg.url.slice(0, 80), e);
+        sendResponse({ ok: false, error: String(e && e.message ? e.message : e) });
+      }
+    })();
+    return true;
+  }
+
+  // ---- 知识库：toast 上的撤销 ----
+  if (msg.type === "DS_KB_UNDO") {
+    kbRemoveExcerpt(msg.id)
+      .then((ex) => {
+        chrome.runtime.sendMessage({ type: "DS_KB_CHANGED" }).catch(() => {});
+        sendResponse({ ok: !!ex });
+      })
+      .catch(() => sendResponse({ ok: false }));
+    return true;
+  }
+
+  // ---- 知识库：toast 上的「整理」→ 打开侧边栏并定位到该条 ----
+  if (msg.type === "DS_KB_OPEN") {
+    chrome.storage.local.set({ kbFocusExcerpt: { id: msg.id, at: Date.now() } });
+    const tab = sender && sender.tab;
+    if (tab) chrome.sidePanel.open({ windowId: tab.windowId }).catch(() => {});
+    sendResponse({ ok: true });
+    return;
+  }
+
+  // ---- 侧边栏修改自动导出开关后：同步每日闹钟 ----
+  if (msg.type === "DS_KB_EXPORT_SETTINGS") {
+    syncAutoExportAlarm()
+      .then(() => sendResponse({ ok: true }))
+      .catch((e) => sendResponse({ ok: false, error: String(e && e.message ? e.message : e) }));
+    return true;
+  }
 
   // ---- 侧边栏「弹出为独立小窗」按钮（可指定站点，不改变当前选中态） ----
   if (msg.type === "DS_POPUP_WINDOW") {

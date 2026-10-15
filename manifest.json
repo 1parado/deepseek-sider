@@ -10,7 +10,8 @@
     "sidePanel",
     "storage",
     "declarativeNetRequest",
-    "contextMenus"
+    "contextMenus",
+    "alarms"
   ],
   "host_permissions": ["<all_urls>"],
   "background": {
@@ -73,5 +74,11 @@
         "path": "rules.json"
       }
     ]
+  },
+  "commands": {
+    "kb-capture": {
+      "suggested_key": { "default": "Alt+S" },
+      "description": "保存选区/当前 AI 回复到知识库"
+    }
   }
 }
